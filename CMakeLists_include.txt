@@ -1,0 +1,273 @@
+set(VERSION "1.3.3")
+
+SET(RESOURCE_DIRECTORY "${BASE_DIRECTORY}/resources")
+add_definitions(-DRESOURCE_DIRECTORY="${RESOURCE_DIRECTORY}/")
+
+Message(STATUS "BASE_DIRECTORY = ${BASE_DIRECTORY}")
+Message(STATUS "CMAKE_CURRENT_SOURCE_DIR = ${CMAKE_CURRENT_SOURCE_DIR}")
+
+# Specify the list of directories to search for cmake modules.
+set(CMAKE_MODULE_PATH
+    ${BASE_DIRECTORY}/cmake
+)
+
+set( CMAKE_FIND_ROOT_PATH "")
+
+if( CMAKE_SIZEOF_VOID_P EQUAL 8 )
+  set (ARCH "x64" CACHE STRING "CPU Architecture")
+else ()
+  set (ARCH "x86" CACHE STRING "CPU Architecture")
+endif()
+
+set(EXECUTABLE_OUTPUT_PATH
+    ${BASE_DIRECTORY}/bin_${ARCH}
+    CACHE PATH
+    "Directory where executables will be stored"
+)
+
+# Set the default build to Release.  Note this doesn't do anything for the VS
+# default build target.
+if(NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE "Release" CACHE STRING
+      "Choose the type of build, options are: Debug Release RelWithDebInfo MinSizeRel."
+      FORCE)
+endif(NOT CMAKE_BUILD_TYPE)
+
+
+#####################################################################################
+function(_make_relative FROM TO OUT)
+  #message(STATUS "FROM = ${FROM}")
+  #message(STATUS "TO = ${TO}")
+  
+  get_filename_component(FROM ${FROM} ABSOLUTE)
+  get_filename_component(TO ${TO} ABSOLUTE)
+  
+  string(REPLACE "/" ";" FROM_LIST ${FROM})
+  string(REPLACE "/" ";" TO_LIST ${TO})
+  
+  #message(STATUS "FROM = ${FROM_LIST}")
+  #message(STATUS "TO = ${TO_LIST}")
+  
+  list(LENGTH FROM_LIST flen)
+  math(EXPR flen "${flen} - 1" )
+  #message(STATUS "flen = ${flen}")
+  list(LENGTH TO_LIST tlen)
+  math(EXPR tlen "${tlen} - 1" )
+  #message(STATUS "tlen = ${tlen}")
+  
+  set(REL_LIST)
+  foreach(loop_var RANGE ${flen})
+    #message(STATUS "i = ${loop_var}")
+    if ((loop_var GREATER tlen) OR (loop_var EQUAL tlen))
+      list(APPEND REL_LIST "..")
+      #message(STATUS "descend")
+    else()
+      list(GET FROM_LIST ${loop_var} f)
+      list(GET TO_LIST ${loop_var} t)
+      #message(STATUS "f = ${f}")
+      #message(STATUS "t = ${t}")
+      if (${f} STREQUAL ${t})
+        set(begin ${loop_var})
+        #message(STATUS "equal")
+      else()
+        list(APPEND REL_LIST "..")
+        #message(STATUS "descend")
+      endif()
+    endif()
+  endforeach(loop_var)
+  math(EXPR begin "${begin} + 1" )
+  
+  #message(STATUS "---")
+  
+  foreach(loop_var RANGE ${begin} ${tlen})
+    #message(STATUS "i = ${loop_var}")
+    #message(STATUS "t = ${t}")
+    #message(STATUS "ascend")
+    list(GET TO_LIST ${loop_var} t)
+    list(APPEND REL_LIST ${t})
+  endforeach(loop_var)
+  
+  #message(STATUS "relative = ${REL_LIST}")
+
+  string (REPLACE ";" "/" _TMP_STR "${REL_LIST}")
+  set (${OUT} "${_TMP_STR}" PARENT_SCOPE)
+endfunction()
+
+macro(_add_project_definitions name)
+  if(MSVC)
+    _make_relative("${EXECUTABLE_OUTPUT_PATH}/config" "${CMAKE_CURRENT_SOURCE_DIR}" TOPROJECT)
+  else()
+    _make_relative("${EXECUTABLE_OUTPUT_PATH}" "${CMAKE_CURRENT_SOURCE_DIR}" TOPROJECT)
+  endif()
+  
+  #message(STATUS "${TOPROJECT}")
+  
+  add_definitions(-DPROJECT_RELDIRECTORY="${TOPROJECT}/")
+  add_definitions(-DPROJECT_ABSDIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/")
+  add_definitions(-DPROJECT_NAME="${name}")  
+  
+endmacro(_add_project_definitions)
+
+#####################################################################################
+if(UNIX) 
+  set(OS "linux")
+  add_definitions(-DLINUX)
+else(UNIX)
+  if(APPLE)
+  else(APPLE)
+    if(WIN32)
+      set(OS "win")
+      add_definitions(-DNOMINMAX)
+      if(MEMORY_LEAKS_CHECK)
+        add_definitions(-DMEMORY_LEAKS_CHECK)
+      endif()
+    endif(WIN32)
+  endif(APPLE)
+endif(UNIX)
+
+
+# Macro for adding files close to the executable
+macro(_copy_files_to_target target thefiles)
+    if(WIN32)
+        foreach (FFF ${thefiles} )
+          if(EXISTS "${FFF}")
+            add_custom_command(
+              TARGET ${target} POST_BUILD
+              COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${FFF}
+                $<TARGET_FILE_DIR:${target}>
+                VERBATIM
+            )
+          endif()
+        endforeach()
+    endif()
+endmacro()
+
+# ===============> GLFW
+find_package(GLFW)
+if(GLFW_FOUND)
+  include_directories(${GLFW_INCLUDE_DIR} )
+endif()
+
+macro(_add_package_VulkanSDK)
+  find_package(VulkanSDK)  
+  if(VULKANSDK_FOUND)
+      Message(STATUS "--> using package VulkanSDK")
+      add_definitions(-DUSEVULKANSDK)
+      include_directories(${VULKANSDK_INCLUDE_DIR})
+    LIST(APPEND LIBRARIES_OPTIMIZED ${VULKAN_LIB} )
+      LIST(APPEND LIBRARIES_DEBUG ${VULKAN_LIB} )
+      LIST(APPEND PACKAGE_SOURCE_FILES ${VULKANSDK_HEADERS} )
+      source_group(OPTIX FILES  ${VULKANSDK_HEADERS} )
+ else()
+     Message(STATUS "--> NOT using package VulkanSDK")
+ endif()
+endmacro()
+
+#####################################################################################
+#
+set(PLATFORM_LIBRARIES)
+set(COMMON_SOURCE_FILES)
+
+#####################################################################################
+# GLFW library
+if(GLFW_FOUND)
+  message(STATUS "using GLFW library ${GLFW_LIBRARY}")
+  LIST(APPEND PLATFORM_LIBRARIES ${GLFW_LIBRARY})
+  add_definitions(-DUSE_GLFW)
+endif()
+
+
+#####################################################################################
+# Macro that copies various binaries that need to be close to the exe files
+#
+macro(_copy_binaries_to_target _PROJNAME)
+
+  if(SUPPORT_NVTOOLSEXT)
+    _copy_files_to_target( ${_PROJNAME} "${NSIGHT_DLL}")
+    install(FILES "${NSIGHT_DLL}" DESTINATION bin)
+    install(FILES "${NSIGHT_DLL}" DESTINATION bin_debug)
+  endif()
+
+  if(NOT UNIX)
+    if(ZLIB_FOUND)
+      _copy_files_to_target( ${_PROJNAME} "${ZLIB_BIN}")
+      install(FILES "${ZLIB_BIN}" DESTINATION bin)
+      install(FILES "${ZLIB_BIN}" DESTINATION bin_debug)
+    endif()
+
+    if(SVCMFCUI_FOUND)
+        _copy_files_to_target( ${_PROJNAME} "${SVCMFCUI_DLL}")
+        install(FILES "${SVCMFCUI_DLL}" DESTINATION bin)
+        if(SVCMFCUID_DLL)
+          _copy_files_to_target( ${_PROJNAME} "${SVCMFCUID_DLL}")
+          install(FILES "${SVCMFCUID_DLL}" DESTINATION bin_debug)
+        endif()
+   endif()
+  endif()
+  if(ANTTWEAKBAR_FOUND)
+    _copy_files_to_target( ${_PROJNAME} "${ANTTWEAKBAR_DLL}")
+    install(FILES "${ANTTWEAKBAR_DLL}" DESTINATION bin)
+    install(FILES "${ANTTWEAKBAR_DLL}" DESTINATION bin_debug)
+  endif()
+  if(OPTIX_FOUND)
+    _copy_files_to_target( ${_PROJNAME} "${OPTIX_DLL}")
+    install(FILES "${OPTIX_DLL}" DESTINATION bin)
+    install(FILES "${OPTIX_DLL}" DESTINATION bin_debug)
+  endif()
+  install(TARGETS ${_PROJNAME} DESTINATION bin CONFIGURATIONS Release)
+  install(TARGETS ${_PROJNAME} DESTINATION bin_debug CONFIGURATIONS Debug)
+endmacro()
+
+include_directories(
+    ${BASE_DIRECTORY}/shared_sources
+)
+
+#####################################################################################
+# Macro to download a file from a URL
+#
+macro(_download_file _URL _TARGET _FORCE)
+  if(${_FORCE} OR (NOT EXISTS ${_TARGET}))
+    Message(STATUS "downloading ${_URL} ==> ${_TARGET}")
+    file(DOWNLOAD ${_URL} ${_TARGET} SHOW_PROGRESS)
+  else()
+    Message(STATUS "model ${_TARGET} already loaded...")
+  endif()
+endmacro()
+#
+# example: _download_files("${FILELIST}"  "http://..." "${BASE_DIRECTORY}/shared_external/..." ${MODELS_DOWNLOAD_FORCE} )
+#
+macro(_download_files _FILELIST _URL _TARGET _FORCE )
+  foreach(_FILE ${_FILELIST})
+    if(${_FORCE} OR (NOT EXISTS "${_TARGET}/${_FILE}"))
+      Message(STATUS "*******************************************")
+      Message(STATUS "downloading ${_URL}/${_FILE}\n ==>\n ${_TARGET}")
+      Message(STATUS "*******************************************")
+      file(DOWNLOAD ${_URL}/${_FILE} ${_TARGET}/${_FILE} SHOW_PROGRESS)
+    else()
+      Message(STATUS "model ${_FILE} already loaded...")
+    endif()
+  endforeach(_FILE)
+endmacro()
+
+#####################################################################################
+# Macro to add custom build for Spir-V
+# _SOURCE can be more than one file (.vert + .frag)
+# _OUTPUT is the .spv file, resulting from the linkage
+#
+macro(_compile_GLSL _SOURCE _OUTPUT SOURCE_LIST)
+  LIST(APPEND ${SOURCE_LIST} ${_SOURCE})
+  Message(STATUS "${GLSLANGVALIDATOR} -o ${_OUTPUT} -V ${_SOURCE}")
+  Message(STATUS "${_OUTPUT} : ${_SOURCE}")
+  if(GLSLANGVALIDATOR)
+    add_custom_command(
+      OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/${_OUTPUT}
+      COMMAND echo ${GLSLANGVALIDATOR} -o ${_OUTPUT} -V ${_SOURCE}
+      COMMAND ${GLSLANGVALIDATOR} -o ${_OUTPUT} -V ${_SOURCE}
+      MAIN_DEPENDENCY ${_SOURCE}
+      WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+      )
+  else(GLSLANGVALIDATOR)
+    MESSAGE(WARNING "could not find GLSLANGVALIDATOR to compile shaders")
+  endif(GLSLANGVALIDATOR)
+endmacro()
