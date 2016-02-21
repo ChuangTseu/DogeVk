@@ -5,9 +5,7 @@
 #include <windows.h>
 
 #if 0
-extern "C" {
-	_declspec(dllexport) DWORD NvOptimusEnablement = 0x00000001;
-};
+extern "C" { _declspec(dllexport) DWORD NvOptimusEnablement = 0x00000001; }; // Force use of discrete GPU with Nvidia Optimus
 #endif
 
 #endif
@@ -52,12 +50,9 @@ constexpr uint32_t makeApiVersionNumber(uint32_t major, uint32_t minor, uint32_t
 	return (major << 22u) | (minor << 12u) | patch;
 }
 
-//constexpr uint32_t mask_22_31 = 0b11111111110000000000000000000000u;
-constexpr uint32_t mask_22_31 = 0xFFC00000u;
-//constexpr uint32_t mask_21_12 = 0b00000000001111111111000000000000u;
-constexpr uint32_t mask_21_12 = 0x3FF000u;
-//constexpr uint32_t mask_11_0 = 0b00000000000000000000111111111111u;
-constexpr uint32_t mask_11_0 = 0xFFFu;
+constexpr uint32_t mask_22_31 = 0xFFC00000u;	// 0b11111111110000000000000000000000u
+constexpr uint32_t mask_21_12 = 0x3FF000u;		// 0b00000000001111111111000000000000u
+constexpr uint32_t mask_11_0 = 0xFFFu;			// 0b00000000000000000000111111111111u
 
 std::tuple<uint32_t, uint32_t, uint32_t> decomposeApiVersionNumber(uint32_t apiVersionNumber) {
 	return std::make_tuple(
@@ -127,39 +122,15 @@ std::map<VkPhysicalDeviceType, const char*> VkPhysicalDeviceTypeNameMap{
 DECLARE_VkEnumName_OVERLOAD(VkResult)
 DECLARE_VkEnumName_OVERLOAD(VkPhysicalDeviceType)
 
-//
-//#define BOB_COUNT_THEN(vkFn, obj) \
-//	uint32_t obj##Count; \
-//	gRes = vkFn()
-//
-//void bob() {
-//	VkResult gRes;
-//	VkDevice gDevice;
-//	VkSwapchainKHR gSwapchain;
-//
-//	uint32_t swapchainImageCount;
-//	gRes = vkGetSwapchainImagesKHR(gDevice, gSwapchain, &swapchainImageCount, nullptr);
-//	VKFN_SUCCESS_OR_QUIT(vkGetSwapchainImagesKHR, gRes);
-//
-//	if (swapchainImageCount < 1) {
-//		eprintf("Could not find any image for this swapchain\n");
-//		exit(EXIT_FAILURE);
-//	}
-//
-//	std::vector<VkImage> aSwapImages(swapchainImageCount);
-//
-//	gRes = vkGetSwapchainImagesKHR(gDevice, gSwapchain, &swapchainImageCount, aSwapImages.data());
-//	VKFN_SUCCESS_OR_QUIT(vkGetSwapchainImagesKHR, gRes);
-//}
-
-//const char* VkResultName[]
 
 const char* appName = "DogeVk";
 const uint32_t appVersion = makeApiVersionNumber(0u, 0u, 0u);
 const char* engineName = "DogeVk";
 const uint32_t engineVersion = makeApiVersionNumber(0u, 0u, 0u);
 
-VkResult gVkLastRes;
+const int WINDOW_WIDTH = 640; 
+const int WINDOW_HEIGHT = 480;
+
 
 #define VKFN_LAST_RES_SUCCESS_OR_QUIT(vkFn) if (gVkLastRes != VK_SUCCESS) { \
 	eprintf(#vkFn " error : %d -> %s\n", gVkLastRes, VkEnumName(gVkLastRes)); \
@@ -172,12 +143,18 @@ GLFWwindow* gGLFWwindow;
 
 // Vulkan Main Components
 
+VkResult gVkLastRes;
+
 VkInstance gVkInstance;
 
 VkPhysicalDevice gVkPhysicalDevice; // Assume a single VkPhysicalDevice for this simple demo, ignore others
 VkPhysicalDeviceProperties gVkPhysicalDeviceProperties;
 
 VkDevice gVkDevice;
+
+const uint32_t queueCount = 2u;
+VkQueue gVkGraphicsQueue;
+VkQueue gVkPresentQueue;
 
 VkSurfaceKHR gVkSurface;
 
@@ -314,13 +291,13 @@ void initializeMainDevice() { // TODO : Query real queue families and properties
 
 	VkDeviceQueueCreateInfo aQueueCreateInfo[1];
 
-	float queuePriorities[1u] = { 1.0f };
+	float queuePriorities[queueCount] = { 1.0f, 1.0f };
 
 	aQueueCreateInfo[0].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
 	aQueueCreateInfo[0].pNext = nullptr;
 	aQueueCreateInfo[0].flags = 0u; // Ignore, reserved for future use
 	aQueueCreateInfo[0].queueFamilyIndex = 0u; // Assuming simple hc case
-	aQueueCreateInfo[0].queueCount = 1u; // Only one for now ?
+	aQueueCreateInfo[0].queueCount = queueCount; // Only one for now ?
 	aQueueCreateInfo[0].pQueuePriorities = queuePriorities;
 
 	VkDeviceCreateInfo deviceCreateInfo;
@@ -513,8 +490,13 @@ int main()
 	initializeMainPhysicalDevice(isValidPhysicalDeviceHeuristic);
 	initializeMainDevice();
 
+	vkGetDeviceQueue(gVkDevice, 0, 0, &gVkGraphicsQueue);
+	vkGetDeviceQueue(gVkDevice, 0, 1, &gVkPresentQueue);
+
+	glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE); // Do not support resizing for now
+
 	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-	gGLFWwindow = glfwCreateWindow(640, 480, appName, NULL, NULL);
+	gGLFWwindow = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, appName, NULL, NULL);
 	if (!gGLFWwindow)
 	{
 		eprintf("Failed to initialize glfw window\n");
@@ -533,22 +515,36 @@ int main()
 	semCreateInfo.pNext = nullptr;
 	semCreateInfo.flags = 0;
 
-	VkSemaphore acquireNextImageSem;
-	gVkLastRes = vkCreateSemaphore(gVkDevice, &semCreateInfo, nullptr, &acquireNextImageSem);
+	VkSemaphore imageAcquiredSemaphore;
+	gVkLastRes = vkCreateSemaphore(gVkDevice, &semCreateInfo, nullptr, &imageAcquiredSemaphore);
 	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkCreateSemaphore);
-
-	uint32_t currentSwapImage = UINT32_MAX;
-	gVkLastRes = vkAcquireNextImageKHR(gVkDevice, gVkSwapchain, UINT64_MAX, acquireNextImageSem, VK_NULL_HANDLE, &currentSwapImage);
-	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkAcquireNextImageKHR);
-
-
-	VkQueue queue;
-	vkGetDeviceQueue(gVkDevice, 0, 0, &queue);
 
 	/* Loop until the user closes the window */
 	while (!glfwWindowShouldClose(gGLFWwindow))
 	{
 		/* Render here */
+		uint32_t currentSwapImage = UINT32_MAX;
+		gVkLastRes = vkAcquireNextImageKHR(gVkDevice, gVkSwapchain, UINT64_MAX, imageAcquiredSemaphore, VK_NULL_HANDLE, &currentSwapImage);
+		VKFN_LAST_RES_SUCCESS_OR_QUIT(vkAcquireNextImageKHR);
+
+		// Submit present operation to present queue
+		VkPresentInfoKHR presentInfo;
+
+		presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+		presentInfo.pNext = nullptr;
+		presentInfo.waitSemaphoreCount = 1u;
+		presentInfo.pWaitSemaphores = &imageAcquiredSemaphore; // TODO wait on rendering done once doing true rendering
+		presentInfo.swapchainCount = 1u;
+		presentInfo.pSwapchains = &gVkSwapchain;
+		presentInfo.pImageIndices = &currentSwapImage;
+		presentInfo.pResults = nullptr;
+
+		//VkQueue& presentQueue = queue; // Maybe wrong to use the same queue for present and graphics, TODO check that once doing true rendering
+
+		gVkLastRes = vkQueuePresentKHR(gVkPresentQueue, &presentInfo);
+		VKFN_LAST_RES_SUCCESS_OR_QUIT(vkQueuePresentKHR);
+
+		/* End of Rendering */
 
 		using namespace std::chrono_literals;
 		std::this_thread::sleep_for(16ms);
