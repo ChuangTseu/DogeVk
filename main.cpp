@@ -141,16 +141,24 @@ DECLARE_VkEnumName_OVERLOAD(VkPhysicalDeviceType)
 //{
 int main()
 {
+	/* Initialize the library */
+	if (!glfwInit()) {
+		exit(EXIT_FAILURE);
+	}
+
 	printf("glfwVulkanSupported : %d\n", glfwVulkanSupported());
 
-	int nbRequiredVkExts;
-	const char** requiredVkExtsNames;
+	uint32_t nbRequiredVkExts = 0;
+	int nbRequiredVkExtsInt = 0;
+	const char** requiredVkExtsNames = nullptr;
 	
-	requiredVkExtsNames = glfwGetRequiredInstanceExtensions(&nbRequiredVkExts);
+	requiredVkExtsNames = glfwGetRequiredInstanceExtensions(&nbRequiredVkExtsInt);
 
-	printf("nbRequiredVkExts : %d\n", nbRequiredVkExts);
+	nbRequiredVkExts = static_cast<uint32_t>(nbRequiredVkExtsInt);
 
-	for (int i = 0; i < nbRequiredVkExts; ++i) {
+	printf("nbRequiredVkExts : %u\n", nbRequiredVkExts);
+
+	for (uint32_t i = 0; i < nbRequiredVkExts; ++i) {
 		printf("%s\n", requiredVkExtsNames[i]);
 	}
 
@@ -200,6 +208,12 @@ int main()
 
 	printf("nbPhysicalDevices : %d\n", nbPhysicalDevices);
 
+	if (glfwGetPhysicalDevicePresentationSupport(instance, physicalDevices[0], 0))
+	{
+		printf("glfwGetPhysicalDevicePresentationSupport is TRUE\n");
+		// Queue family supports image presentation
+	}
+
 	for (uint32_t i = 0u; i < nbPhysicalDevices; ++i) {
 		VkPhysicalDeviceProperties physicalDeviceProperties;
 
@@ -242,13 +256,6 @@ int main()
 
 		vkGetPhysicalDeviceQueueFamilyProperties(physicalDevices[i], &nbQueueFamilyProperties, aQueueFamilyProperties.data());
 
-		//typedef struct VkQueueFamilyProperties {
-		//	VkQueueFlags    queueFlags;
-		//	uint32_t        queueCount;
-		//	uint32_t        timestampValidBits;
-		//	VkExtent3D      minImageTransferGranularity;
-		//} VkQueueFamilyProperties;
-
 		for (uint32_t nProp = 0; nProp < nbQueueFamilyProperties; ++nProp) {
 			const VkQueueFamilyProperties& prop = aQueueFamilyProperties[nProp];
 
@@ -261,53 +268,57 @@ int main()
 		}
 	}
 
+	// Retrieve features
+	VkPhysicalDeviceFeatures physicalDeviceFeatures;
+	vkGetPhysicalDeviceFeatures(physicalDevices[0], &physicalDeviceFeatures);
+
+	VkDeviceQueueCreateInfo aQueueCreateInfo[1];
+
+	float queuePriorities[1u] = { 1.0f };
+
+	aQueueCreateInfo[0].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+	aQueueCreateInfo[0].pNext = nullptr;
+	aQueueCreateInfo[0].flags = 0u; // Ignore, reserved for future use
+	aQueueCreateInfo[0].queueFamilyIndex = 0u; // Assuming simple hc case
+	aQueueCreateInfo[0].queueCount = 1u; // Only one for now ?
+	aQueueCreateInfo[0].pQueuePriorities = queuePriorities;
+
 	VkDeviceCreateInfo deviceCreateInfo;
 
 	deviceCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
 	deviceCreateInfo.pNext = nullptr;
 	deviceCreateInfo.flags = 0u; // Ignore, reserved for future use
-	//deviceCreateInfo.queueCreateInfoCount = ;
-	//deviceCreateInfo.pQueueCreateInfos = ;
-	//deviceCreateInfo.enabledLayerCount = ;
-	//deviceCreateInfo.ppEnabledLayerNames = ;
-	//deviceCreateInfo.enabledExtensionCount = ;
-	//deviceCreateInfo.ppEnabledExtensionNames = ;
-	//deviceCreateInfo.pEnabledFeatures = ;
+	deviceCreateInfo.queueCreateInfoCount = 1u;
+	deviceCreateInfo.pQueueCreateInfos = aQueueCreateInfo;
+	deviceCreateInfo.enabledLayerCount = 0u;
+	deviceCreateInfo.ppEnabledLayerNames = nullptr;
+	deviceCreateInfo.enabledExtensionCount = 0u;
+	deviceCreateInfo.ppEnabledExtensionNames = nullptr;
+	deviceCreateInfo.pEnabledFeatures = &physicalDeviceFeatures; // Currently do not care about fine tuning this, BUT read the doc, some features may incure a useless runtime cost
 
-	//VkDevice device;
-	//vkCreateDevice(physicalDevices[0], &deviceCreateInfo, nullptr, &device);
+	VkDevice device;
+	res = vkCreateDevice(physicalDevices[0], &deviceCreateInfo, nullptr, &device);
+	VKFN_SUCCESS_OR_QUIT(vkCreateDevice, res);
 
-
-
-	//if (glfwGetPhysicalDevicePresentationSupport(instance, physical_device, queue_family_index))
-	//{
-	//	// Queue family supports image presentation
-	//}
-
-
-
-	//vkCreateInstance()
-
-	return 0;
-
-	GLFWwindow* window;
-
-	/* Initialize the library */
-	if (!glfwInit()) {
-		exit(EXIT_FAILURE);
-	}
-
-	/* Create a windowed mode window and its OpenGL context */
-	window = glfwCreateWindow(640, 480, "Hello World", NULL, NULL);
+	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+	GLFWwindow* window = glfwCreateWindow(640, 480, "DogeVk", NULL, NULL);
 	if (!window)
 	{
-		std::cout << "Failed to initialize glfw window" << '\n';
+		eprintf("Failed to initialize glfw window\n");
 		glfwTerminate();
 		exit(EXIT_FAILURE);
 	}
 
-	/* Make the window's context current */
-	glfwMakeContextCurrent(window);
+	VkSurfaceKHR surface;
+	res = glfwCreateWindowSurface(instance, window, NULL, &surface);
+	VKFN_SUCCESS_OR_QUIT(glfwCreateWindowSurface, res);
+
+	vkDeviceWaitIdle(device);
+
+	// Destroy children here
+
+	// WARNING, all child ressource MUST be freed before destroying the device
+	vkDestroyDevice(device, nullptr);
 
 	/* Loop until the user closes the window */
 	while (!glfwWindowShouldClose(window))
@@ -317,10 +328,9 @@ int main()
 		using namespace std::chrono_literals;
 		std::this_thread::sleep_for(16ms);
 
-		std::cout << "Rendered" << '\n';
+		printf("Rendered\n");
 
 		/* Swap front and back buffers */
-		// glfwSwapBuffers(window);
 
 		/* Poll for and process events */
 		glfwPollEvents();
