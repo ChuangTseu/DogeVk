@@ -64,6 +64,8 @@ std::tuple<uint32_t, uint32_t, uint32_t> decomposeApiVersionNumber(uint32_t apiV
 
 #define eprintf(format, ...) fprintf(stderr, format, ##__VA_ARGS__)
 
+#define exit_eprintf(format, ...) fprintf(stderr, format, ##__VA_ARGS__); exit(EXIT_FAILURE)
+
 //constexpr uint32_t makeApiVersionNumber(uint32_t major, uint32_t minor, uint32_t patch) {	
 //	return 
 //		(major < 1024 && minor < 1024 && patch < 4096) 
@@ -133,8 +135,7 @@ const int WINDOW_HEIGHT = 480;
 
 
 #define VKFN_LAST_RES_SUCCESS_OR_QUIT(vkFn) if (gVkLastRes != VK_SUCCESS) { \
-	eprintf(#vkFn " error : %d -> %s\n", gVkLastRes, VkEnumName(gVkLastRes)); \
-	exit(EXIT_FAILURE); \
+	exit_eprintf(#vkFn " error : %d -> %s\n", gVkLastRes, VkEnumName(gVkLastRes)); \
 }
 
 // GLFW Main Components
@@ -149,6 +150,7 @@ VkInstance gVkInstance;
 
 VkPhysicalDevice gVkPhysicalDevice; // Assume a single VkPhysicalDevice for this simple demo, ignore others
 VkPhysicalDeviceProperties gVkPhysicalDeviceProperties;
+VkPhysicalDeviceMemoryProperties gVkPhysicalMemProperties;
 
 VkDevice gVkDevice;
 
@@ -203,8 +205,7 @@ void initializeMainPhysicalDevice(isValidPhysicalDeviceHeuristicFnType isValidPh
 	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkEnumeratePhysicalDevices);
 
 	if (physicalDeviceCount < 1) {
-		eprintf("Could not find any physical device for this vkInstance\n");
-		exit(EXIT_FAILURE);
+		exit_eprintf("Could not find any physical device for this vkInstance\n");
 	}
 
 	std::vector<VkPhysicalDevice> aPhysicalDevices(physicalDeviceCount);
@@ -248,8 +249,7 @@ void initializeMainPhysicalDevice(isValidPhysicalDeviceHeuristicFnType isValidPh
 		vkGetPhysicalDeviceQueueFamilyProperties(aPhysicalDevices[i], &queueFamilyPropertyCount, nullptr);
 
 		if (queueFamilyPropertyCount < 1) {
-			eprintf("Could not find any queue family properties for this physical device\n");
-			exit(EXIT_FAILURE);
+			exit_eprintf("Could not find any queue family properties for this physical device\n");
 		}
 
 		printf("\t nbQueueFamilyProperties : %d\n", queueFamilyPropertyCount);
@@ -278,8 +278,7 @@ void initializeMainPhysicalDevice(isValidPhysicalDeviceHeuristicFnType isValidPh
 	}
 
 	if (chosenPhysicalDeviceIndex == UINT32_MAX) {
-		eprintf("Could not find any valid physical device\n");
-		exit(EXIT_FAILURE);
+		exit_eprintf("Could not find any valid physical device\n");
 	}
 
 	printf("Physical device #%u has been chosen\n", chosenPhysicalDeviceIndex);	
@@ -337,8 +336,7 @@ void initializeSwapchain(uint32_t desiredNumberOfCustomSwapchainImages) {
 	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkGetPhysicalDeviceSurfaceFormatsKHR);
 
 	if (surfaceFormatCount < 1) {
-		eprintf("Could not find any surface format for this physical device and surface\n");
-		exit(EXIT_FAILURE);
+		exit_eprintf("Could not find any surface format for this physical device and surface\n");
 	}
 
 	std::vector<VkSurfaceFormatKHR> aSurfaceFormats(surfaceFormatCount);
@@ -347,8 +345,7 @@ void initializeSwapchain(uint32_t desiredNumberOfCustomSwapchainImages) {
 	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkGetPhysicalDeviceSurfaceFormatsKHR);
 
 	if (aSurfaceFormats[0].format == VK_FORMAT_UNDEFINED) {
-		eprintf("Surface format #0 is undefined\n");
-		exit(EXIT_FAILURE);
+		exit_eprintf("Surface format #0 is undefined\n");
 	}
 
 	////////
@@ -358,8 +355,7 @@ void initializeSwapchain(uint32_t desiredNumberOfCustomSwapchainImages) {
 	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkGetPhysicalDeviceSurfacePresentModesKHR);
 
 	if (presentModeCount < 1) {
-		eprintf("Could not find any persent mode for this physical device and surface\n");
-		exit(EXIT_FAILURE);
+		exit_eprintf("Could not find any persent mode for this physical device and surface\n");
 	}
 
 	std::vector<VkPresentModeKHR> aPresentModes(presentModeCount);
@@ -412,8 +408,7 @@ void initializeSwapchainImageViews() {
 	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkGetSwapchainImagesKHR);
 
 	if (gSwapchainImageCount < 1) {
-		eprintf("Could not find any image for this swapchain\n");
-		exit(EXIT_FAILURE);
+		exit_eprintf("Could not find any image for this swapchain\n");
 	}
 
 	gaSwapImages.resize(gSwapchainImageCount);
@@ -488,8 +483,10 @@ int main()
 
 	initializeMainInstance(nbRequiredVkExts, requiredVkExtsNames);
 	initializeMainPhysicalDevice(isValidPhysicalDeviceHeuristic);
+
 	initializeMainDevice();
 
+	// TODO These queues should be properly created and retrieved via initializeMainDevice() through some parameterization
 	vkGetDeviceQueue(gVkDevice, 0, 0, &gVkGraphicsQueue);
 	vkGetDeviceQueue(gVkDevice, 0, 1, &gVkPresentQueue);
 
@@ -519,12 +516,150 @@ int main()
 	gVkLastRes = vkCreateSemaphore(gVkDevice, &semCreateInfo, nullptr, &imageAcquiredSemaphore);
 	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkCreateSemaphore);
 
+	// RENDER PASS SETUP
+
+	VkAttachmentDescription attachementDescription;
+
+	attachementDescription.flags = 0;
+	attachementDescription.format = gVkSwapchainFormat;
+	attachementDescription.samples = VK_SAMPLE_COUNT_1_BIT;
+	attachementDescription.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+	attachementDescription.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+	attachementDescription.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+	attachementDescription.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+	attachementDescription.initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL; // TODO check these
+	attachementDescription.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL; // TODO check these
+
+	VkAttachmentReference simpleOutColorAttachementReference;
+
+	simpleOutColorAttachementReference.attachment = 0u;
+	simpleOutColorAttachementReference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+	VkSubpassDescription subpassDescription;
+
+	subpassDescription.flags = 0;
+	subpassDescription.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+	subpassDescription.inputAttachmentCount = 0u;
+	subpassDescription.pInputAttachments = nullptr;
+	subpassDescription.colorAttachmentCount = 1u;
+	subpassDescription.pColorAttachments = &simpleOutColorAttachementReference;
+	subpassDescription.pResolveAttachments = nullptr;
+	subpassDescription.pDepthStencilAttachment = nullptr;
+	subpassDescription.preserveAttachmentCount = 0u;
+	subpassDescription.pPreserveAttachments = nullptr;
+
+	VkRenderPassCreateInfo renderPassCreateInfo;
+
+	renderPassCreateInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+	renderPassCreateInfo.pNext = nullptr;
+	renderPassCreateInfo.flags = 0;
+	renderPassCreateInfo.attachmentCount = 1u;
+	renderPassCreateInfo.pAttachments = &attachementDescription;
+	renderPassCreateInfo.subpassCount = 1u;
+	renderPassCreateInfo.pSubpasses = &subpassDescription;
+	renderPassCreateInfo.dependencyCount = 0u;
+	renderPassCreateInfo.pDependencies = nullptr;
+
+	VkRenderPass renderPass;
+
+	vkCreateRenderPass(gVkDevice, &renderPassCreateInfo, nullptr, &renderPass);
+
+	// MEMORY INFOS QUERY
+
+	vkGetPhysicalDeviceMemoryProperties(gVkPhysicalDevice, &gVkPhysicalMemProperties);
+
+	VkMemoryPropertyFlags desiredMemTypeFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
+
+	// VERTEX BUFFER SETUP
+
+	VkBuffer vertexBuffer;
+
+	VkBufferCreateInfo vertexBufferCreateInfo;
+
+	const uint32_t vertexCount = 3u;
+	const VkDeviceSize sizeofVertex = 3*sizeof(float);
+
+	uint32_t vertexBufferQueueFamilyIndex = 0u;
+
+	vertexBufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+	vertexBufferCreateInfo.pNext = nullptr;
+	vertexBufferCreateInfo.flags = 0u;
+	vertexBufferCreateInfo.size = vertexCount*sizeofVertex;
+	vertexBufferCreateInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+	vertexBufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+	vertexBufferCreateInfo.queueFamilyIndexCount = 1u;
+	vertexBufferCreateInfo.pQueueFamilyIndices = &vertexBufferQueueFamilyIndex;
+
+	gVkLastRes = vkCreateBuffer(gVkDevice, &vertexBufferCreateInfo, nullptr, &vertexBuffer);
+	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkCreateBuffer);
+
+	VkMemoryRequirements vertexBufferMemReqs;
+
+	vkGetBufferMemoryRequirements(gVkDevice, vertexBuffer, &vertexBufferMemReqs);
+
+	auto lambdaGetOptimalMemTypeIndex = [](uint32_t desiredMemTypeFlags, uint32_t compatibleTypesBitset) -> uint32_t {
+		for (uint32_t i = 0; i < gVkPhysicalMemProperties.memoryTypeCount; ++i) {
+			if ((compatibleTypesBitset >> i) & 1u) { // Memory type at index i is supported
+				if ((gVkPhysicalMemProperties.memoryTypes[i].propertyFlags & desiredMemTypeFlags) == desiredMemTypeFlags) {
+					return i;
+				}
+			}			
+		}
+
+		return UINT32_MAX;
+	};
+
+	uint32_t vertexBufferMemTypeIndex = lambdaGetOptimalMemTypeIndex(VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, vertexBufferMemReqs.memoryTypeBits);
+
+	if (vertexBufferMemTypeIndex == UINT32_MAX) {
+		exit_eprintf("Could not find any suitable memory type for this vertex buffer");
+	}
+
+	VkDeviceMemory vertexBufferMemory; // TODO use same memory zone for all buffers
+
+	VkMemoryAllocateInfo vertexBufferMemAllocInfo;
+
+	vertexBufferMemAllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+	vertexBufferMemAllocInfo.pNext = nullptr;
+	vertexBufferMemAllocInfo.allocationSize = vertexBufferMemReqs.size;
+	vertexBufferMemAllocInfo.memoryTypeIndex = vertexBufferMemTypeIndex;
+
+	gVkLastRes = vkAllocateMemory(gVkDevice, &vertexBufferMemAllocInfo, nullptr, &vertexBufferMemory);
+	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkAllocateMemory);
+
+	gVkLastRes = vkBindBufferMemory(gVkDevice, vertexBuffer, vertexBufferMemory, 0ul);
+	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkBindBufferMemory);
+
+	exit(EXIT_SUCCESS);
+
+	uint32_t gVkMainDeviceHeapIndex = UINT32_MAX;
+	uint32_t gVkMainDeviceMemTypeIndex = UINT32_MAX;
+
+	for (uint32_t i = 0; i < gVkPhysicalMemProperties.memoryTypeCount; ++i) {
+		if ((gVkPhysicalMemProperties.memoryTypes[i].propertyFlags & desiredMemTypeFlags) == desiredMemTypeFlags) {
+			gVkMainDeviceMemTypeIndex = i;
+			gVkMainDeviceHeapIndex = gVkPhysicalMemProperties.memoryTypes[i].heapIndex;
+
+			break;
+		}
+	}
+
+	if (gVkMainDeviceHeapIndex != UINT32_MAX && gVkMainDeviceMemTypeIndex != UINT32_MAX 
+		&& (gVkPhysicalMemProperties.memoryHeaps[gVkMainDeviceHeapIndex].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) != 0) {
+		printf("Using main device memory type #%u at heap index #%u\n", gVkMainDeviceMemTypeIndex, gVkMainDeviceHeapIndex);
+	}
+	else {
+		exit_eprintf("Could not find any suitable device memory\n");
+	}
+
+	exit(EXIT_SUCCESS);
+
 	/* Loop until the user closes the window */
 	while (!glfwWindowShouldClose(gGLFWwindow))
 	{
 		/* Render here */
-		uint32_t currentSwapImage = UINT32_MAX;
-		gVkLastRes = vkAcquireNextImageKHR(gVkDevice, gVkSwapchain, UINT64_MAX, imageAcquiredSemaphore, VK_NULL_HANDLE, &currentSwapImage);
+		uint32_t currentSwapImageIndex = UINT32_MAX;
+		gVkLastRes = vkAcquireNextImageKHR(gVkDevice, gVkSwapchain, UINT64_MAX, imageAcquiredSemaphore, VK_NULL_HANDLE, &currentSwapImageIndex);
 		VKFN_LAST_RES_SUCCESS_OR_QUIT(vkAcquireNextImageKHR);
 
 		// Submit present operation to present queue
@@ -536,10 +671,110 @@ int main()
 		presentInfo.pWaitSemaphores = &imageAcquiredSemaphore; // TODO wait on rendering done once doing true rendering
 		presentInfo.swapchainCount = 1u;
 		presentInfo.pSwapchains = &gVkSwapchain;
-		presentInfo.pImageIndices = &currentSwapImage;
+		presentInfo.pImageIndices = &currentSwapImageIndex;
 		presentInfo.pResults = nullptr;
 
-		//VkQueue& presentQueue = queue; // Maybe wrong to use the same queue for present and graphics, TODO check that once doing true rendering
+		//////////////////////////////////////////////////////////////////
+
+		// DESCRIPTOR SET
+
+
+
+		// FRAMEBUFFER
+
+		VkFramebufferCreateInfo framebufferCreateInfo;
+
+		framebufferCreateInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+		framebufferCreateInfo.pNext = nullptr;
+		framebufferCreateInfo.flags = 0;
+		framebufferCreateInfo.renderPass = renderPass;
+		framebufferCreateInfo.attachmentCount = 1u;
+		framebufferCreateInfo.pAttachments = &gaSwapViews[currentSwapImageIndex];
+		framebufferCreateInfo.width = static_cast<uint32_t>(WINDOW_WIDTH);
+		framebufferCreateInfo.height = static_cast<uint32_t>(WINDOW_HEIGHT);
+		framebufferCreateInfo.layers = 1u;
+
+		VkFramebuffer framebuffer;
+
+		vkCreateFramebuffer(gVkDevice, &framebufferCreateInfo, nullptr, &framebuffer);
+
+		// COMMAND BUFFER (POOL)
+
+		VkCommandPool cmdPool;
+
+		VkCommandPoolCreateInfo cmdPoolCreateInfo;
+
+		cmdPoolCreateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+		cmdPoolCreateInfo.pNext = nullptr;
+		cmdPoolCreateInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT; // TODO create diverse pools with optimal support for either pure static cmd buffers or dynamic ones
+		cmdPoolCreateInfo.queueFamilyIndex = 0u;
+
+		gVkLastRes = vkCreateCommandPool(gVkDevice, &cmdPoolCreateInfo, nullptr, &cmdPool);
+		VKFN_LAST_RES_SUCCESS_OR_QUIT(vkCreateCommandPool);
+
+		// COMMAND BUFFER
+
+		VkCommandBuffer drawTriangleCmdBuffer;
+
+		VkCommandBufferAllocateInfo drawTriangleCmdBufferAllocInfo;
+
+		drawTriangleCmdBufferAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+		drawTriangleCmdBufferAllocInfo.pNext = nullptr;
+		drawTriangleCmdBufferAllocInfo.commandPool = cmdPool;
+		drawTriangleCmdBufferAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+		drawTriangleCmdBufferAllocInfo.commandBufferCount = 1;
+
+		gVkLastRes = vkAllocateCommandBuffers(gVkDevice, &drawTriangleCmdBufferAllocInfo, &drawTriangleCmdBuffer);
+		VKFN_LAST_RES_SUCCESS_OR_QUIT(vkAllocateCommandBuffers);
+
+		VkCommandBufferBeginInfo drawTriangleCmdBufferBeginInfo;
+
+		drawTriangleCmdBufferBeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+		drawTriangleCmdBufferBeginInfo.pNext = nullptr;
+		drawTriangleCmdBufferBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT; // TODO learn more about flags in case of a more elaborate use
+		drawTriangleCmdBufferBeginInfo.pInheritanceInfo = nullptr;
+
+		// RENDER PASS LAUNCH
+
+		VkClearValue clearValue;
+
+		clearValue.color = { 1.0f, 0.f, 0.f, 1.f };
+
+		VkRenderPassBeginInfo renderPassBeginInfo;
+
+		renderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+		renderPassBeginInfo.pNext = nullptr;
+		renderPassBeginInfo.renderPass = renderPass;
+		renderPassBeginInfo.framebuffer = framebuffer;
+		renderPassBeginInfo.renderArea = { {0, 0}, {WINDOW_WIDTH, WINDOW_HEIGHT} };
+		renderPassBeginInfo.clearValueCount = 1u;
+		renderPassBeginInfo.pClearValues = &clearValue;
+
+#ifdef DATA_SETUP_DONE
+		gVkLastRes = vkBeginCommandBuffer(drawTriangleCmdBuffer, &drawTriangleCmdBufferBeginInfo);
+		VKFN_LAST_RES_SUCCESS_OR_QUIT(vkBeginCommandBuffer);
+
+
+		/* RECORD DRAW CALL CMDS HERE */
+		vkCmdBeginRenderPass(drawTriangleCmdBuffer, &renderpassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+		// bind the pipeline
+		vkCmdBindPipeline(drawTriangleCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+		// bind the descriptor set
+		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, descSetLayout, 1, &descSet, 0, NULL);
+		// set the viewport
+		vkCmdSetViewport(drawTriangleCmdBuffer, 1, &viewport);
+		// draw the triangle
+		vkCmdDraw(drawTriangleCmdBuffer, 3, 1, 0, 0);
+
+		vkCmdEndRenderPass(drawTriangleCmdBuffer);
+
+
+		gVkLastRes = vkEndCommandBuffer(drawTriangleCmdBuffer);
+		VKFN_LAST_RES_SUCCESS_OR_QUIT(vkEndCommandBuffer);
+#endif
+
+		//////////////////////////////////////////////////////////////////
 
 		gVkLastRes = vkQueuePresentKHR(gVkPresentQueue, &presentInfo);
 		VKFN_LAST_RES_SUCCESS_OR_QUIT(vkQueuePresentKHR);
