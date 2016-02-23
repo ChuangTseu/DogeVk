@@ -67,10 +67,3 @@ target_link_libraries(${PROJNAME} debug
     ${PLATFORM_LIBRARIES}
     ${UNIXLINKLIBS}
 )
-
-#####################################################################################
-# copies binaries that need to be put next to the exe files (ZLib, etc.)
-#
-
-_copy_binaries_to_target( ${PROJNAME} )
-

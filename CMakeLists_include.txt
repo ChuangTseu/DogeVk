@@ -177,48 +177,6 @@ if(GLFW_FOUND)
   add_definitions(-DUSE_GLFW)
 endif()
 
-
-#####################################################################################
-# Macro that copies various binaries that need to be close to the exe files
-#
-macro(_copy_binaries_to_target _PROJNAME)
-
-  if(SUPPORT_NVTOOLSEXT)
-    _copy_files_to_target( ${_PROJNAME} "${NSIGHT_DLL}")
-    install(FILES "${NSIGHT_DLL}" DESTINATION bin)
-    install(FILES "${NSIGHT_DLL}" DESTINATION bin_debug)
-  endif()
-
-  if(NOT UNIX)
-    if(ZLIB_FOUND)
-      _copy_files_to_target( ${_PROJNAME} "${ZLIB_BIN}")
-      install(FILES "${ZLIB_BIN}" DESTINATION bin)
-      install(FILES "${ZLIB_BIN}" DESTINATION bin_debug)
-    endif()
-
-    if(SVCMFCUI_FOUND)
-        _copy_files_to_target( ${_PROJNAME} "${SVCMFCUI_DLL}")
-        install(FILES "${SVCMFCUI_DLL}" DESTINATION bin)
-        if(SVCMFCUID_DLL)
-          _copy_files_to_target( ${_PROJNAME} "${SVCMFCUID_DLL}")
-          install(FILES "${SVCMFCUID_DLL}" DESTINATION bin_debug)
-        endif()
-   endif()
-  endif()
-  if(ANTTWEAKBAR_FOUND)
-    _copy_files_to_target( ${_PROJNAME} "${ANTTWEAKBAR_DLL}")
-    install(FILES "${ANTTWEAKBAR_DLL}" DESTINATION bin)
-    install(FILES "${ANTTWEAKBAR_DLL}" DESTINATION bin_debug)
-  endif()
-  if(OPTIX_FOUND)
-    _copy_files_to_target( ${_PROJNAME} "${OPTIX_DLL}")
-    install(FILES "${OPTIX_DLL}" DESTINATION bin)
-    install(FILES "${OPTIX_DLL}" DESTINATION bin_debug)
-  endif()
-  install(TARGETS ${_PROJNAME} DESTINATION bin CONFIGURATIONS Release)
-  install(TARGETS ${_PROJNAME} DESTINATION bin_debug CONFIGURATIONS Debug)
-endmacro()
-
 include_directories(
     ${BASE_DIRECTORY}/shared_sources
 )
