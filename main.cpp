@@ -62,6 +62,10 @@ std::tuple<uint32_t, uint32_t, uint32_t> decomposeApiVersionNumber(uint32_t apiV
 	);
 }
 
+constexpr bool hasBisSet(uint32_t bitsetVal, uint32_t bitIndex) {
+	return (bitsetVal >> bitIndex) & 1;
+}
+
 #define eprintf(format, ...) fprintf(stderr, format, ##__VA_ARGS__)
 
 #define exit_eprintf(format, ...) fprintf(stderr, format, ##__VA_ARGS__); exit(EXIT_FAILURE)
@@ -599,7 +603,7 @@ int main()
 
 	auto lambdaGetOptimalMemTypeIndex = [](uint32_t desiredMemTypeFlags, uint32_t compatibleTypesBitset) -> uint32_t {
 		for (uint32_t i = 0; i < gVkPhysicalMemProperties.memoryTypeCount; ++i) {
-			if ((compatibleTypesBitset >> i) & 1u) { // Memory type at index i is supported
+			if (hasBisSet(compatibleTypesBitset, i)) { // Memory type at index i is supported
 				if ((gVkPhysicalMemProperties.memoryTypes[i].propertyFlags & desiredMemTypeFlags) == desiredMemTypeFlags) {
 					return i;
 				}
@@ -607,6 +611,24 @@ int main()
 		}
 
 		return UINT32_MAX;
+	};
+
+	auto lambdaCreateSimpleBuffer = [](VkBufferUsageFlags usage, VkDeviceSize size, VkBuffer* pOutBuffer) -> void {
+		VkBufferCreateInfo bufferCreateInfo;
+
+		uint32_t bufferQueueFamilyIndex = 0u; // TODO as param or implicit if device member with single graphics queue family
+
+		bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+		bufferCreateInfo.pNext = nullptr;
+		bufferCreateInfo.flags = 0u;
+		bufferCreateInfo.size = size;
+		bufferCreateInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+		bufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+		bufferCreateInfo.queueFamilyIndexCount = 1u;
+		bufferCreateInfo.pQueueFamilyIndices = &bufferQueueFamilyIndex;
+
+		gVkLastRes = vkCreateBuffer(gVkDevice, &bufferCreateInfo, nullptr, pOutBuffer);
+		VKFN_LAST_RES_SUCCESS_OR_QUIT(vkCreateBuffer);
 	};
 
 	uint32_t vertexBufferMemTypeIndex = lambdaGetOptimalMemTypeIndex(VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, vertexBufferMemReqs.memoryTypeBits);
