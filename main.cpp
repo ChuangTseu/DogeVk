@@ -26,7 +26,7 @@ extern "C" { _declspec(dllexport) DWORD NvOptimusEnablement = 0x00000001; }; // 
 #include <tuple>
 #include <cassert>
 
-std::unique_ptr<char> readFileToCharBuffer(const char* szFilename, size_t& bufferLength) {
+std::unique_ptr<char> readFileToCharBuffer(const char* szFilename, size_t* pOutBufferLength) {
 	std::ifstream fileSource;
 	fileSource.open(szFilename, std::ios::binary | std::ios::in | std::ios::ate);
 
@@ -35,11 +35,11 @@ std::unique_ptr<char> readFileToCharBuffer(const char* szFilename, size_t& buffe
 		exit(EXIT_FAILURE);
 	}
 
-	bufferLength = static_cast<size_t>(fileSource.tellg());
+	*pOutBufferLength = static_cast<size_t>(fileSource.tellg());
 	fileSource.seekg(0, std::ios::beg);
 
-	std::unique_ptr<char> memblock(new char[bufferLength]);
-	fileSource.read(memblock.get(), bufferLength);
+	std::unique_ptr<char> memblock(new char[*pOutBufferLength]);
+	fileSource.read(memblock.get(), *pOutBufferLength);
 
 	fileSource.close();
 
@@ -510,11 +510,6 @@ void allocateNewBufferMemory(const VkBuffer* pBuffer, VkDeviceMemory* pOutBuffer
 }
 
 
-//int WINAPI WinMain(HINSTANCE hInstance,
-//	HINSTANCE hPrevInstance,
-//	LPSTR     lpCmdLine,
-//	int       nCmdShow)
-//{
 int main()
 {
 	/* Initialize the library */
@@ -648,7 +643,82 @@ int main()
 	gVkLastRes = vkBindBufferMemory(gVkDevice, indexBuffer, indexBufferMemory, 0ul);
 	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkBindBufferMemory);
 
-	// VERTEX INPUT DESCRIPTION
+	// FULL PIPELINE DESCRIPTION
+
+	// PIPELINE STAGES DESCRIPTION
+
+	VkPipelineShaderStageCreateInfo vertexStageCreateInfo;
+
+	VkShaderModule vertexModule;
+
+	VkShaderModuleCreateInfo vertexModuleCreateInfo;
+
+	size_t vertexModuleCodeSize = size_t{ 0 };
+	const uint32_t* vertexModuleCode = nullptr;
+
+	std::unique_ptr<char> vertexFileBuffer = readFileToCharBuffer(SHADERS_FOLDER_PATH "simple_vert.spv", &vertexModuleCodeSize);
+	vertexModuleCode = (uint32_t*)vertexFileBuffer.get();
+
+	vertexModuleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+	vertexModuleCreateInfo.pNext = nullptr;
+	vertexModuleCreateInfo.flags = 0; // reserved for future use
+	vertexModuleCreateInfo.codeSize = vertexModuleCodeSize;
+	vertexModuleCreateInfo.pCode = vertexModuleCode;
+
+	gVkLastRes = vkCreateShaderModule(gVkDevice, &vertexModuleCreateInfo, nullptr, &vertexModule);
+	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkCreateShaderModule);
+
+	vertexFileBuffer.release();
+
+	//VkSpecializationInfo vertexStageSpecializationInfo;
+
+	//vertexStageSpecializationInfo.mapEntryCount = ;
+	//vertexStageSpecializationInfo.pMapEntries = ;
+	//vertexStageSpecializationInfo.dataSize = ;
+	//vertexStageSpecializationInfo.pData = ;
+
+	vertexStageCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	vertexStageCreateInfo.pNext = nullptr;
+	vertexStageCreateInfo.flags = 0; // reserved for future use
+	vertexStageCreateInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
+	vertexStageCreateInfo.module = vertexModule;
+	vertexStageCreateInfo.pName = "main";
+	vertexStageCreateInfo.pSpecializationInfo = nullptr;
+
+	VkPipelineShaderStageCreateInfo fragmentStageCreateInfo;
+
+	VkShaderModule fragmentModule;
+
+	VkShaderModuleCreateInfo fragmentModuleCreateInfo;
+
+	size_t fragmentModuleCodeSize = size_t{ 0 };
+	const uint32_t* fragmentModuleCode = nullptr;
+
+	std::unique_ptr<char> fragmentFileBuffer = readFileToCharBuffer(SHADERS_FOLDER_PATH "simple_frag.spv", &fragmentModuleCodeSize);
+	fragmentModuleCode = (uint32_t*)fragmentFileBuffer.get();
+
+	fragmentModuleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+	fragmentModuleCreateInfo.pNext = nullptr;
+	fragmentModuleCreateInfo.flags = 0; // reserved for future use
+	fragmentModuleCreateInfo.codeSize = fragmentModuleCodeSize;
+	fragmentModuleCreateInfo.pCode = fragmentModuleCode;
+
+	gVkLastRes = vkCreateShaderModule(gVkDevice, &fragmentModuleCreateInfo, nullptr, &fragmentModule);
+	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkCreateShaderModule);
+
+	fragmentFileBuffer.release();
+
+	fragmentStageCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	fragmentStageCreateInfo.pNext = nullptr;
+	fragmentStageCreateInfo.flags = 0; // reserved for future use
+	fragmentStageCreateInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+	fragmentStageCreateInfo.module = fragmentModule;
+	fragmentStageCreateInfo.pName = "main";
+	fragmentStageCreateInfo.pSpecializationInfo = nullptr;
+
+	VkPipelineShaderStageCreateInfo shaderStagesCreateInfo[] = { vertexStageCreateInfo, fragmentStageCreateInfo };
+
+	// PIPELINE VERTEX INPUT DESCRIPTION
 
 	VkVertexInputBindingDescription inputBindingDesc;
 
@@ -675,6 +745,67 @@ int main()
 	vertexInputStateCreateInfo.pVertexBindingDescriptions = &inputBindingDesc;
 	vertexInputStateCreateInfo.vertexAttributeDescriptionCount = 1u;
 	vertexInputStateCreateInfo.pVertexAttributeDescriptions = vertexInputAttribDescs;
+
+	// PIPELINE INPUT ASSEMBLY DESCRIPTION
+
+	VkPipelineInputAssemblyStateCreateInfo inputAssemblyStateCreateInfo;
+
+	// PIPELINE VIEWPORT DESCRIPTION
+
+	VkPipelineViewportStateCreateInfo viewportStateCreateInfo;
+
+	// PIPELINE RASTERIZATION DESCRIPTION
+
+	VkPipelineRasterizationStateCreateInfo rasterizationStateCreateInfo;
+
+	// PIPELINE MULTISAMPLE DESCRIPTION
+
+	VkPipelineMultisampleStateCreateInfo multisampleStateCreateInfo;
+
+	// PIPELINE DEPTHSTENCIL DESCRIPTION
+
+	VkPipelineDepthStencilStateCreateInfo depthstencilStateCreateInfo;
+
+	// PIPELINE COLORBLEND DESCRIPTION
+
+	VkPipelineColorBlendStateCreateInfo colorblendStateCreateInfo;
+
+	// PIPELINE DYNAMIC DESCRIPTION
+
+	VkPipelineDynamicStateCreateInfo dynamicStateCreateInfo;
+	(void)dynamicStateCreateInfo;
+
+	// PIPELINE LAYOUT
+
+	VkPipelineLayout pipelineLayout;
+
+	// GRAPHICS PIPELINE
+
+	VkPipeline pipeline;
+
+	VkGraphicsPipelineCreateInfo pipelineCreateInfo;
+
+	pipelineCreateInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+	pipelineCreateInfo.pNext = nullptr;
+	pipelineCreateInfo.flags = 0u;
+	pipelineCreateInfo.stageCount = 2u;
+	pipelineCreateInfo.pStages = shaderStagesCreateInfo;
+	pipelineCreateInfo.pVertexInputState = &vertexInputStateCreateInfo;
+	pipelineCreateInfo.pInputAssemblyState = &inputAssemblyStateCreateInfo;
+	pipelineCreateInfo.pTessellationState = nullptr;
+	pipelineCreateInfo.pViewportState = &viewportStateCreateInfo;
+	pipelineCreateInfo.pRasterizationState = &rasterizationStateCreateInfo;
+	pipelineCreateInfo.pMultisampleState = &multisampleStateCreateInfo;
+	pipelineCreateInfo.pDepthStencilState = &depthstencilStateCreateInfo;
+	pipelineCreateInfo.pColorBlendState = &colorblendStateCreateInfo;
+	pipelineCreateInfo.pDynamicState = nullptr; // No dynamic state for this simple pipeline
+	pipelineCreateInfo.layout = pipelineLayout;
+	pipelineCreateInfo.renderPass = renderPass;
+	pipelineCreateInfo.subpass = 0u;
+	pipelineCreateInfo.basePipelineHandle = VK_NULL_HANDLE; // No pipeline inheritance here
+	pipelineCreateInfo.basePipelineIndex = -1;
+
+	vkCreateGraphicsPipelines(gVkDevice, VK_NULL_HANDLE, 1u, &pipelineCreateInfo, nullptr, &pipeline);
 
 	exit(EXIT_SUCCESS);
 

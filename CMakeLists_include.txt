@@ -229,3 +229,18 @@ macro(_compile_GLSL _SOURCE _OUTPUT SOURCE_LIST)
     MESSAGE(WARNING "could not find GLSLANGVALIDATOR to compile shaders")
   endif(GLSLANGVALIDATOR)
 endmacro()
+
+#####################################################################################
+# Macro that copies various binaries that need to be close to the exe files
+#
+macro(_copy_binaries_to_target _PROJNAME)
+
+  set(GLSLANG_VALIDATOR ${BASE_DIRECTORY}/tools/glslang/glslangValidator.exe)
+
+  _copy_files_to_target( ${_PROJNAME} "${GLSLANG_VALIDATOR}")
+  install(FILES "${GLSLANG_VALIDATOR}" DESTINATION bin)
+  install(FILES "${GLSLANG_VALIDATOR}" DESTINATION bin_debug)
+
+  install(TARGETS ${_PROJNAME} DESTINATION bin CONFIGURATIONS Release)
+  install(TARGETS ${_PROJNAME} DESTINATION bin_debug CONFIGURATIONS Debug)
+endmacro()

@@ -22,7 +22,14 @@ _add_package_VulkanSDK()
 # Source files for this project
 #
 file(GLOB SOURCE_FILES *.cpp *.hpp *.inl *.h *.c)
-file(GLOB GLSL_FILES *.glsl)
+# file(GLOB GLSL_FILES *.glsl)
+
+_compile_GLSL("shaders/simple.vert" "shaders/simple_vert.spv" GLSL_FILES SPV_FILES)
+_compile_GLSL("shaders/simple.frag" "shaders/simple_frag.spv" GLSL_FILES SPV_FILES)
+
+source_group(GLSL_Files FILES ${GLSL_FILES})
+
+add_definitions(-DSHADERS_FOLDER_PATH="${BASE_DIRECTORY}/shaders/")
 
 
 #####################################################################################
@@ -40,6 +47,10 @@ if(UNIX)
 else()
   set(UNIXLINKLIBS)
 endif()
+
+if(MSVC)
+  set_target_properties(${PROJNAME} PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
+endif(MSVC)
 
 
 
@@ -67,3 +78,5 @@ target_link_libraries(${PROJNAME} debug
     ${PLATFORM_LIBRARIES}
     ${UNIXLINKLIBS}
 )
+
+_copy_binaries_to_target( ${PROJNAME} )
