@@ -457,6 +457,59 @@ bool isValidPhysicalDeviceHeuristic(VkPhysicalDevice physicalDevice) {
 #endif
 }
 
+uint32_t getOptimalMemTypeIndex(uint32_t desiredMemTypeFlags, uint32_t compatibleTypesBitset) {
+	for (uint32_t i = 0; i < gVkPhysicalMemProperties.memoryTypeCount; ++i) {
+		if (hasBisSet(compatibleTypesBitset, i)) { // Memory type at index i is supported
+			if ((gVkPhysicalMemProperties.memoryTypes[i].propertyFlags & desiredMemTypeFlags) == desiredMemTypeFlags) {
+				return i;
+			}
+		}
+	}
+
+	return UINT32_MAX;
+};
+
+void createSimpleBuffer(VkBufferUsageFlags usage, VkDeviceSize size, VkBuffer* pOutBuffer) {
+	VkBufferCreateInfo bufferCreateInfo;
+
+	uint32_t bufferQueueFamilyIndex = 0u; // TODO as param or implicit if device member with single graphics queue family
+
+	bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+	bufferCreateInfo.pNext = nullptr;
+	bufferCreateInfo.flags = 0u;
+	bufferCreateInfo.size = size;
+	bufferCreateInfo.usage = usage;
+	bufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+	bufferCreateInfo.queueFamilyIndexCount = 1u;
+	bufferCreateInfo.pQueueFamilyIndices = &bufferQueueFamilyIndex;
+
+	gVkLastRes = vkCreateBuffer(gVkDevice, &bufferCreateInfo, nullptr, pOutBuffer);
+	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkCreateBuffer);
+};
+
+void allocateNewBufferMemory(const VkBuffer* pBuffer, VkDeviceMemory* pOutBufferMemory, VkMemoryPropertyFlags desiredMemTypeFlags) {
+	VkMemoryRequirements bufferMemReqs;
+
+	vkGetBufferMemoryRequirements(gVkDevice, *pBuffer, &bufferMemReqs);
+
+	uint32_t bufferMemTypeIndex = getOptimalMemTypeIndex(desiredMemTypeFlags, bufferMemReqs.memoryTypeBits);
+
+	if (bufferMemTypeIndex == UINT32_MAX) {
+		exit_eprintf("Could not find any suitable memory type for this buffer");
+	}
+
+	VkMemoryAllocateInfo bufferMemAllocInfo;
+
+	bufferMemAllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+	bufferMemAllocInfo.pNext = nullptr;
+	bufferMemAllocInfo.allocationSize = bufferMemReqs.size;
+	bufferMemAllocInfo.memoryTypeIndex = bufferMemTypeIndex;
+
+	gVkLastRes = vkAllocateMemory(gVkDevice, &bufferMemAllocInfo, nullptr, pOutBufferMemory);
+	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkAllocateMemory);
+}
+
+
 //int WINAPI WinMain(HINSTANCE hInstance,
 //	HINSTANCE hPrevInstance,
 //	LPSTR     lpCmdLine,
@@ -472,12 +525,9 @@ int main()
 	printf("glfwVulkanSupported : %d\n", glfwVulkanSupported());
 
 	uint32_t nbRequiredVkExts = 0;
-	int nbRequiredVkExtsInt = 0;
 	const char** requiredVkExtsNames = nullptr;
 	
-	requiredVkExtsNames = glfwGetRequiredInstanceExtensions(&nbRequiredVkExtsInt);
-
-	nbRequiredVkExts = static_cast<uint32_t>(nbRequiredVkExtsInt);
+	requiredVkExtsNames = glfwGetRequiredInstanceExtensions(&nbRequiredVkExts);
 
 	printf("nbRequiredVkExts : %u\n", nbRequiredVkExts);
 
@@ -522,35 +572,35 @@ int main()
 
 	// RENDER PASS SETUP
 
-	VkAttachmentDescription attachementDescription;
+	VkAttachmentDescription attachementDesc;
 
-	attachementDescription.flags = 0;
-	attachementDescription.format = gVkSwapchainFormat;
-	attachementDescription.samples = VK_SAMPLE_COUNT_1_BIT;
-	attachementDescription.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-	attachementDescription.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-	attachementDescription.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-	attachementDescription.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-	attachementDescription.initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL; // TODO check these
-	attachementDescription.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL; // TODO check these
+	attachementDesc.flags = 0;
+	attachementDesc.format = gVkSwapchainFormat;
+	attachementDesc.samples = VK_SAMPLE_COUNT_1_BIT;
+	attachementDesc.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+	attachementDesc.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+	attachementDesc.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+	attachementDesc.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+	attachementDesc.initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL; // TODO check these
+	attachementDesc.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL; // TODO check these
 
 	VkAttachmentReference simpleOutColorAttachementReference;
 
 	simpleOutColorAttachementReference.attachment = 0u;
 	simpleOutColorAttachementReference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
-	VkSubpassDescription subpassDescription;
+	VkSubpassDescription subpassDesc;
 
-	subpassDescription.flags = 0;
-	subpassDescription.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-	subpassDescription.inputAttachmentCount = 0u;
-	subpassDescription.pInputAttachments = nullptr;
-	subpassDescription.colorAttachmentCount = 1u;
-	subpassDescription.pColorAttachments = &simpleOutColorAttachementReference;
-	subpassDescription.pResolveAttachments = nullptr;
-	subpassDescription.pDepthStencilAttachment = nullptr;
-	subpassDescription.preserveAttachmentCount = 0u;
-	subpassDescription.pPreserveAttachments = nullptr;
+	subpassDesc.flags = 0;
+	subpassDesc.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+	subpassDesc.inputAttachmentCount = 0u;
+	subpassDesc.pInputAttachments = nullptr;
+	subpassDesc.colorAttachmentCount = 1u;
+	subpassDesc.pColorAttachments = &simpleOutColorAttachementReference;
+	subpassDesc.pResolveAttachments = nullptr;
+	subpassDesc.pDepthStencilAttachment = nullptr;
+	subpassDesc.preserveAttachmentCount = 0u;
+	subpassDesc.pPreserveAttachments = nullptr;
 
 	VkRenderPassCreateInfo renderPassCreateInfo;
 
@@ -558,9 +608,9 @@ int main()
 	renderPassCreateInfo.pNext = nullptr;
 	renderPassCreateInfo.flags = 0;
 	renderPassCreateInfo.attachmentCount = 1u;
-	renderPassCreateInfo.pAttachments = &attachementDescription;
+	renderPassCreateInfo.pAttachments = &attachementDesc;
 	renderPassCreateInfo.subpassCount = 1u;
-	renderPassCreateInfo.pSubpasses = &subpassDescription;
+	renderPassCreateInfo.pSubpasses = &subpassDesc;
 	renderPassCreateInfo.dependencyCount = 0u;
 	renderPassCreateInfo.pDependencies = nullptr;
 
@@ -574,86 +624,61 @@ int main()
 
 	VkMemoryPropertyFlags desiredMemTypeFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
 
-	// VERTEX BUFFER SETUP
-
-	VkBuffer vertexBuffer;
-
-	VkBufferCreateInfo vertexBufferCreateInfo;
+	// VERTEX & INDEX BUFFER SETUP
 
 	const uint32_t vertexCount = 3u;
+	const uint32_t indexCount = 3u;
 	const VkDeviceSize sizeofVertex = 3*sizeof(float);
 
-	uint32_t vertexBufferQueueFamilyIndex = 0u;
+	VkBuffer vertexBuffer;
+	VkBuffer indexBuffer;
 
-	vertexBufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-	vertexBufferCreateInfo.pNext = nullptr;
-	vertexBufferCreateInfo.flags = 0u;
-	vertexBufferCreateInfo.size = vertexCount*sizeofVertex;
-	vertexBufferCreateInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-	vertexBufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-	vertexBufferCreateInfo.queueFamilyIndexCount = 1u;
-	vertexBufferCreateInfo.pQueueFamilyIndices = &vertexBufferQueueFamilyIndex;
-
-	gVkLastRes = vkCreateBuffer(gVkDevice, &vertexBufferCreateInfo, nullptr, &vertexBuffer);
-	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkCreateBuffer);
-
-	VkMemoryRequirements vertexBufferMemReqs;
-
-	vkGetBufferMemoryRequirements(gVkDevice, vertexBuffer, &vertexBufferMemReqs);
-
-	auto lambdaGetOptimalMemTypeIndex = [](uint32_t desiredMemTypeFlags, uint32_t compatibleTypesBitset) -> uint32_t {
-		for (uint32_t i = 0; i < gVkPhysicalMemProperties.memoryTypeCount; ++i) {
-			if (hasBisSet(compatibleTypesBitset, i)) { // Memory type at index i is supported
-				if ((gVkPhysicalMemProperties.memoryTypes[i].propertyFlags & desiredMemTypeFlags) == desiredMemTypeFlags) {
-					return i;
-				}
-			}			
-		}
-
-		return UINT32_MAX;
-	};
-
-	auto lambdaCreateSimpleBuffer = [](VkBufferUsageFlags usage, VkDeviceSize size, VkBuffer* pOutBuffer) -> void {
-		VkBufferCreateInfo bufferCreateInfo;
-
-		uint32_t bufferQueueFamilyIndex = 0u; // TODO as param or implicit if device member with single graphics queue family
-
-		bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-		bufferCreateInfo.pNext = nullptr;
-		bufferCreateInfo.flags = 0u;
-		bufferCreateInfo.size = size;
-		bufferCreateInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-		bufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-		bufferCreateInfo.queueFamilyIndexCount = 1u;
-		bufferCreateInfo.pQueueFamilyIndices = &bufferQueueFamilyIndex;
-
-		gVkLastRes = vkCreateBuffer(gVkDevice, &bufferCreateInfo, nullptr, pOutBuffer);
-		VKFN_LAST_RES_SUCCESS_OR_QUIT(vkCreateBuffer);
-	};
-
-	uint32_t vertexBufferMemTypeIndex = lambdaGetOptimalMemTypeIndex(VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, vertexBufferMemReqs.memoryTypeBits);
-
-	if (vertexBufferMemTypeIndex == UINT32_MAX) {
-		exit_eprintf("Could not find any suitable memory type for this vertex buffer");
-	}
+	createSimpleBuffer(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, vertexCount*sizeofVertex, &vertexBuffer);
+	createSimpleBuffer(VK_BUFFER_USAGE_INDEX_BUFFER_BIT, indexCount*sizeof(uint32_t), &indexBuffer);
 
 	VkDeviceMemory vertexBufferMemory; // TODO use same memory zone for all buffers
+	VkDeviceMemory indexBufferMemory; // TODO use same memory zone for all buffers
 
-	VkMemoryAllocateInfo vertexBufferMemAllocInfo;
-
-	vertexBufferMemAllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-	vertexBufferMemAllocInfo.pNext = nullptr;
-	vertexBufferMemAllocInfo.allocationSize = vertexBufferMemReqs.size;
-	vertexBufferMemAllocInfo.memoryTypeIndex = vertexBufferMemTypeIndex;
-
-	gVkLastRes = vkAllocateMemory(gVkDevice, &vertexBufferMemAllocInfo, nullptr, &vertexBufferMemory);
-	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkAllocateMemory);
+	allocateNewBufferMemory(&vertexBuffer, &vertexBufferMemory, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+	allocateNewBufferMemory(&indexBuffer, &indexBufferMemory, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
 
 	gVkLastRes = vkBindBufferMemory(gVkDevice, vertexBuffer, vertexBufferMemory, 0ul);
 	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkBindBufferMemory);
 
+	gVkLastRes = vkBindBufferMemory(gVkDevice, indexBuffer, indexBufferMemory, 0ul);
+	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkBindBufferMemory);
+
+	// VERTEX INPUT DESCRIPTION
+
+	VkVertexInputBindingDescription inputBindingDesc;
+
+	inputBindingDesc.binding = 0u;
+	inputBindingDesc.stride = sizeofVertex; // Attributes are interleaved for now
+	inputBindingDesc.inputRate = VK_VERTEX_INPUT_RATE_VERTEX; // TODO check the real meaning of this
+
+	VkVertexInputAttributeDescription positionInputAttribDesc;
+	VkVertexInputAttributeDescription normalInputAttribDesc{}; // None currently
+
+	positionInputAttribDesc.location = 0u;
+	positionInputAttribDesc.binding = 0u;
+	positionInputAttribDesc.format = VK_FORMAT_R32G32B32_SFLOAT;
+	positionInputAttribDesc.offset = 0u;
+
+	VkVertexInputAttributeDescription vertexInputAttribDescs[] = { positionInputAttribDesc, normalInputAttribDesc };
+
+	VkPipelineVertexInputStateCreateInfo vertexInputStateCreateInfo;
+
+	vertexInputStateCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+	vertexInputStateCreateInfo.pNext = nullptr;
+	vertexInputStateCreateInfo.flags = 0; // reserved for future use
+	vertexInputStateCreateInfo.vertexBindingDescriptionCount = 1u;
+	vertexInputStateCreateInfo.pVertexBindingDescriptions = &inputBindingDesc;
+	vertexInputStateCreateInfo.vertexAttributeDescriptionCount = 1u;
+	vertexInputStateCreateInfo.pVertexAttributeDescriptions = vertexInputAttribDescs;
+
 	exit(EXIT_SUCCESS);
 
+#if 0
 	uint32_t gVkMainDeviceHeapIndex = UINT32_MAX;
 	uint32_t gVkMainDeviceMemTypeIndex = UINT32_MAX;
 
@@ -673,8 +698,7 @@ int main()
 	else {
 		exit_eprintf("Could not find any suitable device memory\n");
 	}
-
-	exit(EXIT_SUCCESS);
+#endif
 
 	/* Loop until the user closes the window */
 	while (!glfwWindowShouldClose(gGLFWwindow))
