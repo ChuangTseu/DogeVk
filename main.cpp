@@ -565,6 +565,10 @@ int main()
 	gVkLastRes = vkCreateSemaphore(gVkDevice, &semCreateInfo, nullptr, &imageAcquiredSemaphore);
 	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkCreateSemaphore);
 
+	VkSemaphore renderingCompleteSemaphore;
+	gVkLastRes = vkCreateSemaphore(gVkDevice, &semCreateInfo, nullptr, &renderingCompleteSemaphore);
+	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkCreateSemaphore);
+
 	// RENDER PASS SETUP
 
 	VkAttachmentDescription attachementDesc;
@@ -611,7 +615,8 @@ int main()
 
 	VkRenderPass renderPass;
 
-	vkCreateRenderPass(gVkDevice, &renderPassCreateInfo, nullptr, &renderPass);
+	gVkLastRes = vkCreateRenderPass(gVkDevice, &renderPassCreateInfo, nullptr, &renderPass);
+	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkCreateRenderPass);
 
 	// MEMORY INFOS QUERY
 
@@ -625,11 +630,20 @@ int main()
 	const uint32_t indexCount = 3u;
 	const VkDeviceSize sizeofVertex = 3*sizeof(float);
 
+	float vertices[vertexCount][3] = { { -0.5f, -0.5f, 0.f },{ 0.5f, -0.5f, 0.f },{ 0.f, 0.5f, 0.f } };
+	uint32_t indices[indexCount] = { 0u, 1u, 2u };
+
 	VkBuffer vertexBuffer;
 	VkBuffer indexBuffer;
 
-	createSimpleBuffer(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, vertexCount*sizeofVertex, &vertexBuffer);
-	createSimpleBuffer(VK_BUFFER_USAGE_INDEX_BUFFER_BIT, indexCount*sizeof(uint32_t), &indexBuffer);
+	const VkDeviceSize vertexBufferSize = vertexCount*sizeofVertex;
+	const VkDeviceSize indexBufferSize = indexCount*sizeof(uint32_t);
+
+	static_assert(vertexBufferSize == sizeof(vertices), "");
+	static_assert(indexBufferSize == sizeof(indices), "");
+
+	createSimpleBuffer(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, vertexBufferSize, &vertexBuffer);
+	createSimpleBuffer(VK_BUFFER_USAGE_INDEX_BUFFER_BIT, indexBufferSize, &indexBuffer);
 
 	VkDeviceMemory vertexBufferMemory; // TODO use same memory zone for all buffers
 	VkDeviceMemory indexBufferMemory; // TODO use same memory zone for all buffers
@@ -642,6 +656,44 @@ int main()
 
 	gVkLastRes = vkBindBufferMemory(gVkDevice, indexBuffer, indexBufferMemory, 0ul);
 	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkBindBufferMemory);
+
+	VkMappedMemoryRange vertexMappedMemoryRange;
+
+	vertexMappedMemoryRange.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+	vertexMappedMemoryRange.pNext = nullptr;
+	vertexMappedMemoryRange.memory = vertexBufferMemory;
+	vertexMappedMemoryRange.offset = 0u;
+	vertexMappedMemoryRange.size = vertexBufferSize;
+
+	VkMappedMemoryRange indexMappedMemoryRange;
+
+	indexMappedMemoryRange.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+	indexMappedMemoryRange.pNext = nullptr;
+	indexMappedMemoryRange.memory = indexBufferMemory;
+	indexMappedMemoryRange.offset = 0u;
+	indexMappedMemoryRange.size = indexBufferSize;
+
+	void* vertexMapAddr;
+	gVkLastRes = vkMapMemory(gVkDevice, vertexMappedMemoryRange.memory, vertexMappedMemoryRange.offset, vertexMappedMemoryRange.size, 
+		0, &vertexMapAddr);
+	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkMapMemory);
+
+	void* indexMapAddr;
+	gVkLastRes = vkMapMemory(gVkDevice, indexMappedMemoryRange.memory, indexMappedMemoryRange.offset, indexMappedMemoryRange.size,
+		0, &indexMapAddr);
+	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkMapMemory);
+
+	// Do Writes
+	memcpy(vertexMapAddr, vertices, vertexBufferSize);
+	memcpy(indexMapAddr, indices, indexBufferSize);
+
+	VkMappedMemoryRange mappedMemoryRangeArray[] = { vertexMappedMemoryRange, indexMappedMemoryRange };
+
+	gVkLastRes = vkFlushMappedMemoryRanges(gVkDevice, 2u, mappedMemoryRangeArray);
+	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkFlushMappedMemoryRanges);
+
+	vkUnmapMemory(gVkDevice, vertexBufferMemory);
+	vkUnmapMemory(gVkDevice, indexBufferMemory);
 
 	// FULL PIPELINE DESCRIPTION
 
@@ -727,14 +779,14 @@ int main()
 	inputBindingDesc.inputRate = VK_VERTEX_INPUT_RATE_VERTEX; // TODO check the real meaning of this
 
 	VkVertexInputAttributeDescription positionInputAttribDesc;
-	VkVertexInputAttributeDescription normalInputAttribDesc{}; // None currently
+	//VkVertexInputAttributeDescription normalInputAttribDesc{}; // None currently
 
 	positionInputAttribDesc.location = 0u;
 	positionInputAttribDesc.binding = 0u;
-	positionInputAttribDesc.format = VK_FORMAT_R32G32B32_SFLOAT;
+	positionInputAttribDesc.format = vertexCount == 3 ? VK_FORMAT_R32G32B32_SFLOAT : VK_FORMAT_R32G32B32A32_SFLOAT;
 	positionInputAttribDesc.offset = 0u;
 
-	VkVertexInputAttributeDescription vertexInputAttribDescs[] = { positionInputAttribDesc, normalInputAttribDesc };
+	VkVertexInputAttributeDescription vertexInputAttribDescs[] = { positionInputAttribDesc };
 
 	VkPipelineVertexInputStateCreateInfo vertexInputStateCreateInfo;
 
@@ -854,7 +906,8 @@ int main()
 	colorblendStateCreateInfo.attachmentCount = 1u;
 	colorblendStateCreateInfo.pAttachments = &singleColorBlendState;
 	colorblendStateCreateInfo.blendConstants; // ignore
-
+
+
 
 	// PIPELINE DYNAMIC DESCRIPTION
 
@@ -864,6 +917,20 @@ int main()
 	// PIPELINE LAYOUT
 
 	VkPipelineLayout pipelineLayout;
+
+	VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo;
+
+	pipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+	pipelineLayoutCreateInfo.pNext = nullptr;
+	pipelineLayoutCreateInfo.flags = 0; // reserved for future use
+	pipelineLayoutCreateInfo.setLayoutCount = 0u;
+	pipelineLayoutCreateInfo.pSetLayouts = nullptr;
+	pipelineLayoutCreateInfo.pushConstantRangeCount = 0u;
+	pipelineLayoutCreateInfo.pPushConstantRanges = nullptr;
+
+
+	gVkLastRes = vkCreatePipelineLayout(gVkDevice, &pipelineLayoutCreateInfo, nullptr, &pipelineLayout);
+	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkCreatePipelineLayout);
 
 	// GRAPHICS PIPELINE
 
@@ -891,9 +958,8 @@ int main()
 	pipelineCreateInfo.basePipelineHandle = VK_NULL_HANDLE; // No pipeline inheritance here
 	pipelineCreateInfo.basePipelineIndex = -1;
 
-	vkCreateGraphicsPipelines(gVkDevice, VK_NULL_HANDLE, 1u, &pipelineCreateInfo, nullptr, &pipeline);
-
-	exit(EXIT_SUCCESS);
+	gVkLastRes = vkCreateGraphicsPipelines(gVkDevice, VK_NULL_HANDLE, 1u, &pipelineCreateInfo, nullptr, &pipeline);
+	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkCreateGraphicsPipelines);
 
 #if 0
 	uint32_t gVkMainDeviceHeapIndex = UINT32_MAX;
@@ -925,23 +991,11 @@ int main()
 		gVkLastRes = vkAcquireNextImageKHR(gVkDevice, gVkSwapchain, UINT64_MAX, imageAcquiredSemaphore, VK_NULL_HANDLE, &currentSwapImageIndex);
 		VKFN_LAST_RES_SUCCESS_OR_QUIT(vkAcquireNextImageKHR);
 
-		// Submit present operation to present queue
-		VkPresentInfoKHR presentInfo;
-
-		presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-		presentInfo.pNext = nullptr;
-		presentInfo.waitSemaphoreCount = 1u;
-		presentInfo.pWaitSemaphores = &imageAcquiredSemaphore; // TODO wait on rendering done once doing true rendering
-		presentInfo.swapchainCount = 1u;
-		presentInfo.pSwapchains = &gVkSwapchain;
-		presentInfo.pImageIndices = &currentSwapImageIndex;
-		presentInfo.pResults = nullptr;
-
 		//////////////////////////////////////////////////////////////////
 
 		// DESCRIPTOR SET
 
-
+		// None currently
 
 		// FRAMEBUFFER
 
@@ -959,7 +1013,8 @@ int main()
 
 		VkFramebuffer framebuffer;
 
-		vkCreateFramebuffer(gVkDevice, &framebufferCreateInfo, nullptr, &framebuffer);
+		gVkLastRes = vkCreateFramebuffer(gVkDevice, &framebufferCreateInfo, nullptr, &framebuffer);
+		VKFN_LAST_RES_SUCCESS_OR_QUIT(vkCreateFramebuffer);
 
 		// COMMAND BUFFER (POOL)
 
@@ -1001,7 +1056,7 @@ int main()
 
 		VkClearValue clearValue;
 
-		clearValue.color = { 1.0f, 0.f, 0.f, 1.f };
+		clearValue.color = { 0.3f, 0.3f, 0.3f, 1.f };
 
 		VkRenderPassBeginInfo renderPassBeginInfo;
 
@@ -1013,31 +1068,64 @@ int main()
 		renderPassBeginInfo.clearValueCount = 1u;
 		renderPassBeginInfo.pClearValues = &clearValue;
 
-#ifdef DATA_SETUP_DONE
+		// REGISTER COMMAND BUFFER
+
 		gVkLastRes = vkBeginCommandBuffer(drawTriangleCmdBuffer, &drawTriangleCmdBufferBeginInfo);
 		VKFN_LAST_RES_SUCCESS_OR_QUIT(vkBeginCommandBuffer);
 
 
 		/* RECORD DRAW CALL CMDS HERE */
-		vkCmdBeginRenderPass(drawTriangleCmdBuffer, &renderpassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+		vkCmdBeginRenderPass(drawTriangleCmdBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-		// bind the pipeline
 		vkCmdBindPipeline(drawTriangleCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-		// bind the descriptor set
-		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, descSetLayout, 1, &descSet, 0, NULL);
-		// set the viewport
-		vkCmdSetViewport(drawTriangleCmdBuffer, 1, &viewport);
-		// draw the triangle
-		vkCmdDraw(drawTriangleCmdBuffer, 3, 1, 0, 0);
+
+		// TODO activate this once descriptors are needed
+		//vkCmdBindDescriptorSets(drawTriangleCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0u, 0u, nullptr, 0u, nullptr);
+
+		vkCmdBindIndexBuffer(drawTriangleCmdBuffer, indexBuffer, 0u, VK_INDEX_TYPE_UINT32);
+
+		VkDeviceSize vertexBufferOffsetArray[] = { 0 };
+		vkCmdBindVertexBuffers(drawTriangleCmdBuffer, 0u, 1u, &vertexBuffer, vertexBufferOffsetArray);
+
+		vkCmdDrawIndexed(drawTriangleCmdBuffer, 3u, 1u, 0u, 0u, 0u);
 
 		vkCmdEndRenderPass(drawTriangleCmdBuffer);
 
 
 		gVkLastRes = vkEndCommandBuffer(drawTriangleCmdBuffer);
 		VKFN_LAST_RES_SUCCESS_OR_QUIT(vkEndCommandBuffer);
-#endif
 
 		//////////////////////////////////////////////////////////////////
+
+		VkSubmitInfo submitInfo;
+
+		VkPipelineStageFlags waitSwapchainAcquiredAtStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+
+		submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+		submitInfo.pNext = nullptr;
+		submitInfo.waitSemaphoreCount = 1u;
+		submitInfo.pWaitSemaphores = &imageAcquiredSemaphore;
+		submitInfo.pWaitDstStageMask = &waitSwapchainAcquiredAtStage;
+		submitInfo.commandBufferCount = 1u;
+		submitInfo.pCommandBuffers = &drawTriangleCmdBuffer;
+		submitInfo.signalSemaphoreCount = 1u;
+		submitInfo.pSignalSemaphores = &renderingCompleteSemaphore;
+
+		gVkLastRes = vkQueueSubmit(gVkGraphicsQueue, 1u, &submitInfo, VK_NULL_HANDLE);
+		VKFN_LAST_RES_SUCCESS_OR_QUIT(vkQueueSubmit);
+
+		// Submit present operation to present queue
+		VkPresentInfoKHR presentInfo;
+
+		presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+		presentInfo.pNext = nullptr;
+		presentInfo.waitSemaphoreCount = 1u;
+		presentInfo.pWaitSemaphores = &renderingCompleteSemaphore;
+		presentInfo.swapchainCount = 1u;
+		presentInfo.pSwapchains = &gVkSwapchain;
+		presentInfo.pImageIndices = &currentSwapImageIndex;
+		presentInfo.pResults = nullptr;
+
 
 		gVkLastRes = vkQueuePresentKHR(gVkPresentQueue, &presentInfo);
 		VKFN_LAST_RES_SUCCESS_OR_QUIT(vkQueuePresentKHR);
@@ -1055,7 +1143,8 @@ int main()
 		glfwPollEvents();
 	}
 
-	vkDeviceWaitIdle(gVkDevice);
+	gVkLastRes = vkDeviceWaitIdle(gVkDevice);
+	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkDeviceWaitIdle);
 
 	// Destroy children here
 
