@@ -786,17 +786,75 @@ int main()
 
 	VkPipelineRasterizationStateCreateInfo rasterizationStateCreateInfo;
 
+	rasterizationStateCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+	rasterizationStateCreateInfo.pNext = nullptr;
+	rasterizationStateCreateInfo.flags = 0; // reserved for future use
+	rasterizationStateCreateInfo.depthClampEnable = VK_FALSE;
+	rasterizationStateCreateInfo.rasterizerDiscardEnable = VK_FALSE;
+	rasterizationStateCreateInfo.polygonMode = VK_POLYGON_MODE_FILL;
+	rasterizationStateCreateInfo.cullMode = VK_CULL_MODE_NONE;
+	rasterizationStateCreateInfo.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+	rasterizationStateCreateInfo.depthBiasEnable = VK_FALSE;
+	rasterizationStateCreateInfo.depthBiasConstantFactor = 0.f;
+	rasterizationStateCreateInfo.depthBiasClamp = 0.0f;
+	rasterizationStateCreateInfo.depthBiasSlopeFactor = 0.f;
+	rasterizationStateCreateInfo.lineWidth = 0.f;
+
 	// PIPELINE MULTISAMPLE DESCRIPTION
 
 	VkPipelineMultisampleStateCreateInfo multisampleStateCreateInfo;
+
+	multisampleStateCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+	multisampleStateCreateInfo.pNext = nullptr;
+	multisampleStateCreateInfo.flags = 0; // reserved for future use
+	multisampleStateCreateInfo.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+	multisampleStateCreateInfo.sampleShadingEnable = VK_FALSE;
+	multisampleStateCreateInfo.minSampleShading = 0.f; // ignored here (no sampleRateShading)
+	multisampleStateCreateInfo.pSampleMask = nullptr;
+	multisampleStateCreateInfo.alphaToCoverageEnable = VK_FALSE;
+	multisampleStateCreateInfo.alphaToOneEnable = VK_FALSE;
 
 	// PIPELINE DEPTHSTENCIL DESCRIPTION
 
 	VkPipelineDepthStencilStateCreateInfo depthstencilStateCreateInfo;
 
+	depthstencilStateCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+	depthstencilStateCreateInfo.pNext = nullptr;
+	depthstencilStateCreateInfo.flags = 0; // reserved for future use
+	depthstencilStateCreateInfo.depthTestEnable = VK_FALSE;
+	depthstencilStateCreateInfo.depthWriteEnable = VK_FALSE;
+	depthstencilStateCreateInfo.depthCompareOp = VK_COMPARE_OP_LESS;
+	depthstencilStateCreateInfo.depthBoundsTestEnable = VK_FALSE;
+	depthstencilStateCreateInfo.stencilTestEnable = VK_FALSE;
+	depthstencilStateCreateInfo.front = {};
+	depthstencilStateCreateInfo.back = {};
+	depthstencilStateCreateInfo.minDepthBounds = 0.f;
+	depthstencilStateCreateInfo.maxDepthBounds = 0.f;
+
 	// PIPELINE COLORBLEND DESCRIPTION
 
+	VkPipelineColorBlendAttachmentState singleColorBlendState;
+
+	singleColorBlendState.blendEnable = VK_FALSE;
+	singleColorBlendState.srcColorBlendFactor = {};
+	singleColorBlendState.dstColorBlendFactor = {};
+	singleColorBlendState.colorBlendOp = {};
+	singleColorBlendState.srcAlphaBlendFactor = {};
+	singleColorBlendState.dstAlphaBlendFactor = {};
+	singleColorBlendState.alphaBlendOp = {};
+	singleColorBlendState.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+
 	VkPipelineColorBlendStateCreateInfo colorblendStateCreateInfo;
+
+	colorblendStateCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+	colorblendStateCreateInfo.pNext = nullptr;
+	colorblendStateCreateInfo.flags = 0; // reserved for future use
+	colorblendStateCreateInfo.logicOpEnable = VK_FALSE;
+	colorblendStateCreateInfo.logicOp = {};
+	colorblendStateCreateInfo.attachmentCount = 1u;
+	colorblendStateCreateInfo.pAttachments = &singleColorBlendState;
+	colorblendStateCreateInfo.blendConstants; // ignore
+
 
 	// PIPELINE DYNAMIC DESCRIPTION
 
