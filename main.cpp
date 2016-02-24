@@ -750,9 +750,37 @@ int main()
 
 	VkPipelineInputAssemblyStateCreateInfo inputAssemblyStateCreateInfo;
 
+	inputAssemblyStateCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+	inputAssemblyStateCreateInfo.pNext = nullptr;
+	inputAssemblyStateCreateInfo.flags = 0; // reserved for future use
+	inputAssemblyStateCreateInfo.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+	inputAssemblyStateCreateInfo.primitiveRestartEnable = VK_FALSE;
+
 	// PIPELINE VIEWPORT DESCRIPTION
 
 	VkPipelineViewportStateCreateInfo viewportStateCreateInfo;
+
+	VkViewport viewport;
+
+	viewport.x = 0.f;
+	viewport.y = 0.f;
+	viewport.width = float{ WINDOW_WIDTH };
+	viewport.height = float{ WINDOW_HEIGHT };
+	viewport.minDepth = 0.f;
+	viewport.maxDepth = 1.f;
+
+	VkRect2D scissor;
+
+	scissor.offset = { 0, 0 };
+	scissor.extent = { uint32_t{ WINDOW_WIDTH }, uint32_t{ WINDOW_HEIGHT } };
+
+	viewportStateCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+	viewportStateCreateInfo.pNext = nullptr;
+	viewportStateCreateInfo.flags = 0; // reserved for future use
+	viewportStateCreateInfo.viewportCount = 1u;
+	viewportStateCreateInfo.pViewports = &viewport;
+	viewportStateCreateInfo.scissorCount = 1u;
+	viewportStateCreateInfo.pScissors = &scissor;
 
 	// PIPELINE RASTERIZATION DESCRIPTION
 
