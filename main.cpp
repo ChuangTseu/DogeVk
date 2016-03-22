@@ -123,7 +123,15 @@ std::map<VkPhysicalDeviceType, const char*> VkPhysicalDeviceTypeNameMap{
 	TO_ENUM_AND_NAME_PAIR(VK_PHYSICAL_DEVICE_TYPE_MAX_ENUM)
 };
 
-#define DECLARE_VkEnumName_OVERLOAD(VkEnumType) const char* VkEnumName(VkEnumType e) { return VkEnumType##NameMap.at(e); }
+#define DECLARE_VkEnumName_OVERLOAD(VkEnumType) const char* VkEnumName(VkEnumType e) { \
+	auto it = VkEnumType##NameMap.find(e); \
+	if (it != VkEnumType##NameMap.end()) { \
+		return VkEnumType##NameMap.at(e); \
+	} \
+	else { \
+		return "VK_UNKNOWN_RESULT"; \
+	} \
+}
 
 DECLARE_VkEnumName_OVERLOAD(VkResult)
 DECLARE_VkEnumName_OVERLOAD(VkPhysicalDeviceType)
@@ -173,7 +181,8 @@ std::vector<VkImage> gaSwapImages;
 std::vector<VkImageView> gaSwapViews;
 
 
-void initializeMainInstance(uint32_t enabledExtensionCount, const char *const * ppEnabledExtensionNames) {
+void initializeMainInstance(uint32_t enabledLayerCount, const char *const * ppEnabledLayerNames, 
+	uint32_t enabledExtensionCount, const char *const * ppEnabledExtensionNames) {
 	VkApplicationInfo applicationInfo;
 
 	applicationInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
@@ -183,7 +192,7 @@ void initializeMainInstance(uint32_t enabledExtensionCount, const char *const * 
 	applicationInfo.pEngineName = engineName;
 	applicationInfo.engineVersion = engineVersion;
 	//applicationInfo.apiVersion = 0; // Ignore API version // WARNING : Nvidia drivers at this time do not respect this apparently
-	applicationInfo.apiVersion = makeApiVersionNumber(1u, 0u, 3u);
+	applicationInfo.apiVersion = makeApiVersionNumber(1u, 0u, 4u);
 
 	VkInstanceCreateInfo instanceCreateInfo;
 
@@ -191,8 +200,8 @@ void initializeMainInstance(uint32_t enabledExtensionCount, const char *const * 
 	instanceCreateInfo.pNext = nullptr;
 	instanceCreateInfo.flags = 0;
 	instanceCreateInfo.pApplicationInfo = &applicationInfo;
-	instanceCreateInfo.enabledLayerCount = 0;
-	instanceCreateInfo.ppEnabledLayerNames = nullptr;
+	instanceCreateInfo.enabledLayerCount = enabledLayerCount;
+	instanceCreateInfo.ppEnabledLayerNames = ppEnabledLayerNames;
 	instanceCreateInfo.enabledExtensionCount = enabledExtensionCount;
 	instanceCreateInfo.ppEnabledExtensionNames = ppEnabledExtensionNames;
 
@@ -288,7 +297,8 @@ void initializeMainPhysicalDevice(isValidPhysicalDeviceHeuristicFnType isValidPh
 	printf("Physical device #%u has been chosen\n", chosenPhysicalDeviceIndex);	
 }
 
-void initializeMainDevice() { // TODO : Query real queue families and properties from physical device and check validity before creating the device
+void initializeMainDevice(uint32_t enabledLayerCount, const char *const * ppEnabledLayerNames,
+	uint32_t enabledExtensionCount, const char *const * ppEnabledExtensionNames) { // TODO : Query real queue families and properties from physical device and check validity before creating the device
 	VkPhysicalDeviceFeatures physicalDeviceFeatures;
 	vkGetPhysicalDeviceFeatures(gVkPhysicalDevice, &physicalDeviceFeatures);
 
@@ -299,8 +309,8 @@ void initializeMainDevice() { // TODO : Query real queue families and properties
 	aQueueCreateInfo[0].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
 	aQueueCreateInfo[0].pNext = nullptr;
 	aQueueCreateInfo[0].flags = 0u; // Ignore, reserved for future use
-	aQueueCreateInfo[0].queueFamilyIndex = 0u; // Assuming simple hc case
-	aQueueCreateInfo[0].queueCount = queueCount; // Only one for now ?
+	aQueueCreateInfo[0].queueFamilyIndex = 0u; // TODO No more hardcoding for my gpu here
+	aQueueCreateInfo[0].queueCount = queueCount;
 	aQueueCreateInfo[0].pQueuePriorities = queuePriorities;
 
 	VkDeviceCreateInfo deviceCreateInfo;
@@ -310,10 +320,10 @@ void initializeMainDevice() { // TODO : Query real queue families and properties
 	deviceCreateInfo.flags = 0u; // Ignore, reserved for future use
 	deviceCreateInfo.queueCreateInfoCount = 1u;
 	deviceCreateInfo.pQueueCreateInfos = aQueueCreateInfo;
-	deviceCreateInfo.enabledLayerCount = 0u;
-	deviceCreateInfo.ppEnabledLayerNames = nullptr;
-	deviceCreateInfo.enabledExtensionCount = 0u;
-	deviceCreateInfo.ppEnabledExtensionNames = nullptr;
+	deviceCreateInfo.enabledLayerCount = enabledLayerCount;
+	deviceCreateInfo.ppEnabledLayerNames = ppEnabledLayerNames;
+	deviceCreateInfo.enabledExtensionCount = enabledExtensionCount;
+	deviceCreateInfo.ppEnabledExtensionNames = ppEnabledExtensionNames;
 	deviceCreateInfo.pEnabledFeatures = &physicalDeviceFeatures; // Currently do not care about fine tuning this, BUT read the doc, some features may incure a useless runtime cost
 
 	gVkLastRes = vkCreateDevice(gVkPhysicalDevice, &deviceCreateInfo, nullptr, &gVkDevice);
@@ -398,7 +408,8 @@ void initializeSwapchain(uint32_t desiredNumberOfCustomSwapchainImages) {
 	swapchainCreateInfo.queueFamilyIndexCount = 0u;
 	swapchainCreateInfo.pQueueFamilyIndices = nullptr;
 	swapchainCreateInfo.preTransform = surfaceCapabilities.currentTransform;
-	swapchainCreateInfo.compositeAlpha = VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR;
+	swapchainCreateInfo.compositeAlpha = (surfaceCapabilities.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR) ? 
+		VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR : VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR; // TODO Again, find something better than this HC choice
 	swapchainCreateInfo.presentMode = swapchainPresentMode;
 	swapchainCreateInfo.clipped = VK_TRUE;
 	swapchainCreateInfo.oldSwapchain = VK_NULL_HANDLE;
@@ -509,6 +520,107 @@ void allocateNewBufferMemory(const VkBuffer* pBuffer, VkDeviceMemory* pOutBuffer
 	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkAllocateMemory);
 }
 
+#define APPEND_FLAG_NAME_TO_STRING_IF_PRESENT(flags, flagBitDefine, flagsString) \
+	if (flags & flagBitDefine) flagsString += #flagBitDefine;
+
+#define APPEND_FLAG_NAME_TO_STRING_IF_PRESENT_INTERMEDIATE(flags, flagBitDefine, flagsString) \
+	if (flags & flagBitDefine) (flagsString.empty() ? flagsString : (flagsString += " | ")) += #flagBitDefine;
+
+std::string NamesFromVkDebugReportFlagsEXT(VkDebugReportFlagsEXT flags) {
+	std::string reportTypeStr;
+
+	APPEND_FLAG_NAME_TO_STRING_IF_PRESENT(flags, VK_DEBUG_REPORT_INFORMATION_BIT_EXT, reportTypeStr);
+	APPEND_FLAG_NAME_TO_STRING_IF_PRESENT_INTERMEDIATE(flags, VK_DEBUG_REPORT_WARNING_BIT_EXT, reportTypeStr); 
+	APPEND_FLAG_NAME_TO_STRING_IF_PRESENT_INTERMEDIATE(flags, VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT, reportTypeStr);
+	APPEND_FLAG_NAME_TO_STRING_IF_PRESENT_INTERMEDIATE(flags, VK_DEBUG_REPORT_ERROR_BIT_EXT, reportTypeStr);
+	APPEND_FLAG_NAME_TO_STRING_IF_PRESENT_INTERMEDIATE(flags, VK_DEBUG_REPORT_DEBUG_BIT_EXT, reportTypeStr);
+
+	return reportTypeStr;
+}
+
+std::map<VkDebugReportObjectTypeEXT, const char*> VkDebugReportObjectTypeEXTNameMap{
+	TO_ENUM_AND_NAME_PAIR(VK_DEBUG_REPORT_OBJECT_TYPE_UNKNOWN_EXT),
+	TO_ENUM_AND_NAME_PAIR(VK_DEBUG_REPORT_OBJECT_TYPE_INSTANCE_EXT),
+	TO_ENUM_AND_NAME_PAIR(VK_DEBUG_REPORT_OBJECT_TYPE_PHYSICAL_DEVICE_EXT),
+	TO_ENUM_AND_NAME_PAIR(VK_DEBUG_REPORT_OBJECT_TYPE_DEVICE_EXT),
+	TO_ENUM_AND_NAME_PAIR(VK_DEBUG_REPORT_OBJECT_TYPE_QUEUE_EXT),
+	TO_ENUM_AND_NAME_PAIR(VK_DEBUG_REPORT_OBJECT_TYPE_SEMAPHORE_EXT),
+	TO_ENUM_AND_NAME_PAIR(VK_DEBUG_REPORT_OBJECT_TYPE_COMMAND_BUFFER_EXT),
+	TO_ENUM_AND_NAME_PAIR(VK_DEBUG_REPORT_OBJECT_TYPE_FENCE_EXT),
+	TO_ENUM_AND_NAME_PAIR(VK_DEBUG_REPORT_OBJECT_TYPE_DEVICE_MEMORY_EXT),
+	TO_ENUM_AND_NAME_PAIR(VK_DEBUG_REPORT_OBJECT_TYPE_BUFFER_EXT),
+	TO_ENUM_AND_NAME_PAIR(VK_DEBUG_REPORT_OBJECT_TYPE_IMAGE_EXT),
+	TO_ENUM_AND_NAME_PAIR(VK_DEBUG_REPORT_OBJECT_TYPE_EVENT_EXT),
+	TO_ENUM_AND_NAME_PAIR(VK_DEBUG_REPORT_OBJECT_TYPE_QUERY_POOL_EXT),
+	TO_ENUM_AND_NAME_PAIR(VK_DEBUG_REPORT_OBJECT_TYPE_BUFFER_VIEW_EXT),
+	TO_ENUM_AND_NAME_PAIR(VK_DEBUG_REPORT_OBJECT_TYPE_IMAGE_VIEW_EXT),
+	TO_ENUM_AND_NAME_PAIR(VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT),
+	TO_ENUM_AND_NAME_PAIR(VK_DEBUG_REPORT_OBJECT_TYPE_PIPELINE_CACHE_EXT),
+	TO_ENUM_AND_NAME_PAIR(VK_DEBUG_REPORT_OBJECT_TYPE_PIPELINE_LAYOUT_EXT),
+	TO_ENUM_AND_NAME_PAIR(VK_DEBUG_REPORT_OBJECT_TYPE_RENDER_PASS_EXT),
+	TO_ENUM_AND_NAME_PAIR(VK_DEBUG_REPORT_OBJECT_TYPE_PIPELINE_EXT),
+	TO_ENUM_AND_NAME_PAIR(VK_DEBUG_REPORT_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT_EXT),
+	TO_ENUM_AND_NAME_PAIR(VK_DEBUG_REPORT_OBJECT_TYPE_SAMPLER_EXT),
+	TO_ENUM_AND_NAME_PAIR(VK_DEBUG_REPORT_OBJECT_TYPE_DESCRIPTOR_POOL_EXT),
+	TO_ENUM_AND_NAME_PAIR(VK_DEBUG_REPORT_OBJECT_TYPE_DESCRIPTOR_SET_EXT),
+	TO_ENUM_AND_NAME_PAIR(VK_DEBUG_REPORT_OBJECT_TYPE_FRAMEBUFFER_EXT),
+	TO_ENUM_AND_NAME_PAIR(VK_DEBUG_REPORT_OBJECT_TYPE_COMMAND_POOL_EXT),
+	TO_ENUM_AND_NAME_PAIR(VK_DEBUG_REPORT_OBJECT_TYPE_SURFACE_KHR_EXT),
+	TO_ENUM_AND_NAME_PAIR(VK_DEBUG_REPORT_OBJECT_TYPE_SWAPCHAIN_KHR_EXT),
+	TO_ENUM_AND_NAME_PAIR(VK_DEBUG_REPORT_OBJECT_TYPE_DEBUG_REPORT_EXT)
+};
+
+DECLARE_VkEnumName_OVERLOAD(VkDebugReportObjectTypeEXT)
+
+VKAPI_ATTR VkBool32 VKAPI_CALL MyDebugReportCallback(
+	VkDebugReportFlagsEXT       flags,
+	VkDebugReportObjectTypeEXT  objectType,
+	uint64_t                    object,
+	size_t                      location,
+	int32_t                     messageCode,
+	const char*                 pLayerPrefix,
+	const char*                 pMessage,
+	void*                       pUserData)
+{
+	std::cerr << 
+		"*** DEBUG REPORT ***\n" <<
+		"VkDebugReportFlagsEXT: " << NamesFromVkDebugReportFlagsEXT(flags).c_str() << '\n' <<
+		"VkDebugReportObjectTypeEXT: " << VkEnumName(objectType) << '\n' <<
+		"object: " << object << '\n' <<
+		"location: " << location << '\n' <<
+		"messageCode: " << messageCode << '\n' <<
+		"pLayerPrefix: " << pLayerPrefix << '\n' <<
+		"Message: " << pMessage << "\n\n";
+
+	return VK_FALSE;
+}
+
+#define APPLY_2STEPS_QUERY_TO_COUNT_AND_VECTOR_0PARAM(fnVkQuery, countVar, vectorVar) \
+	gVkLastRes = fnVkQuery(&countVar, nullptr); \
+	VKFN_LAST_RES_SUCCESS_OR_QUIT(fnVkQuery);\
+	if (countVar > 0) { \
+		vectorVar.resize(countVar); \
+		gVkLastRes = fnVkQuery(&countVar, &vectorVar[0]); \
+		VKFN_LAST_RES_SUCCESS_OR_QUIT(fnVkQuery); \
+	}
+
+#define APPLY_2STEPS_QUERY_TO_COUNT_AND_VECTOR_1PARAM(fnVkQuery, param1, countVar, vectorVar) \
+	gVkLastRes = fnVkQuery(param1, &countVar, nullptr); \
+	VKFN_LAST_RES_SUCCESS_OR_QUIT(fnVkQuery);\
+	if (countVar > 0) { \
+		vectorVar.resize(countVar); \
+		gVkLastRes = fnVkQuery(param1, &countVar, &vectorVar[0]); \
+		VKFN_LAST_RES_SUCCESS_OR_QUIT(fnVkQuery); \
+	}
+
+#define APPLY_2STEPS_QUERY_TO_COUNT_AND_VECTOR_2PARAM(fnVkQuery, param1, param2, countVar, vectorVar) \
+	gVkLastRes = fnVkQuery(param1, param2, &countVar, nullptr); \
+	VKFN_LAST_RES_SUCCESS_OR_QUIT(fnVkQuery);\
+	if (countVar > 0) { \
+		vectorVar.resize(countVar); \
+		gVkLastRes = fnVkQuery(param1, param2, &countVar, &vectorVar[0]); \
+		VKFN_LAST_RES_SUCCESS_OR_QUIT(fnVkQuery); \
+	}
 
 int main()
 {
@@ -519,21 +631,113 @@ int main()
 
 	printf("glfwVulkanSupported : %d\n", glfwVulkanSupported());
 
-	uint32_t nbRequiredVkExts = 0;
-	const char** requiredVkExtsNames = nullptr;
+	uint32_t requiredGlfwVkExtensionsCount = 0;
+	const char** requiredGlfwVkExtensionNames = nullptr;
 	
-	requiredVkExtsNames = glfwGetRequiredInstanceExtensions(&nbRequiredVkExts);
+	requiredGlfwVkExtensionNames = glfwGetRequiredInstanceExtensions(&requiredGlfwVkExtensionsCount);
 
-	printf("nbRequiredVkExts : %u\n", nbRequiredVkExts);
+	printf("nbRequiredVkExts : %u\n", requiredGlfwVkExtensionsCount);
 
-	for (uint32_t i = 0; i < nbRequiredVkExts; ++i) {
-		printf("%s\n", requiredVkExtsNames[i]);
+	for (uint32_t i = 0; i < requiredGlfwVkExtensionsCount; ++i) {
+		printf("%s\n", requiredGlfwVkExtensionNames[i]);
 	}
 
-	initializeMainInstance(nbRequiredVkExts, requiredVkExtsNames);
+	std::vector<const char*> enabledInstanceLayers;
+
+#if !NDEBUG
+	enabledInstanceLayers.push_back("VK_LAYER_LUNARG_standard_validation");
+#endif
+
+	std::vector<const char*> enabledInstanceExtensions(requiredGlfwVkExtensionNames, requiredGlfwVkExtensionNames + requiredGlfwVkExtensionsCount);
+
+#if !NDEBUG
+	enabledInstanceExtensions.push_back("VK_EXT_debug_report");
+#endif
+
+	uint32_t propertyCount = 0;
+	std::vector<VkLayerProperties> layerProperties;
+
+	APPLY_2STEPS_QUERY_TO_COUNT_AND_VECTOR_0PARAM(vkEnumerateInstanceLayerProperties, propertyCount, layerProperties);
+
+	uint32_t validationLayerExtCount = 0;
+	std::vector<VkExtensionProperties> validationLayerExtProperties;
+
+	APPLY_2STEPS_QUERY_TO_COUNT_AND_VECTOR_1PARAM(vkEnumerateInstanceExtensionProperties, "VK_LAYER_LUNARG_standard_validation",
+		validationLayerExtCount, validationLayerExtProperties);
+
+	uint32_t globalLoaderExtCount = 0;
+	std::vector<VkExtensionProperties> globalLoaderExtProperties;
+
+	APPLY_2STEPS_QUERY_TO_COUNT_AND_VECTOR_1PARAM(vkEnumerateInstanceExtensionProperties, nullptr,
+		globalLoaderExtCount, globalLoaderExtProperties);
+
+	initializeMainInstance(static_cast<uint32_t>(enabledInstanceLayers.size()), enabledInstanceLayers.data(),
+		static_cast<uint32_t>(enabledInstanceExtensions.size()), enabledInstanceExtensions.data());
+
+#if !NDEBUG
+	/* Load VK_EXT_debug_report entry points in debug builds */
+	PFN_vkCreateDebugReportCallbackEXT vkCreateDebugReportCallbackEXT =
+		reinterpret_cast<PFN_vkCreateDebugReportCallbackEXT>
+		(vkGetInstanceProcAddr(gVkInstance, "vkCreateDebugReportCallbackEXT"));
+	PFN_vkDebugReportMessageEXT vkDebugReportMessageEXT =
+		reinterpret_cast<PFN_vkDebugReportMessageEXT>
+		(vkGetInstanceProcAddr(gVkInstance, "vkDebugReportMessageEXT"));
+	PFN_vkDestroyDebugReportCallbackEXT vkDestroyDebugReportCallbackEXT =
+		reinterpret_cast<PFN_vkDestroyDebugReportCallbackEXT>
+		(vkGetInstanceProcAddr(gVkInstance, "vkDestroyDebugReportCallbackEXT"));
+#endif
+
+#if !NDEBUG
+	/* Setup callback creation information */
+	VkDebugReportCallbackCreateInfoEXT callbackCreateInfo;
+	callbackCreateInfo.sType = VK_STRUCTURE_TYPE_DEBUG_REPORT_CREATE_INFO_EXT;
+	callbackCreateInfo.pNext = nullptr;
+	//callbackCreateInfo.flags = VK_DEBUG_REPORT_ERROR_BIT_EXT |
+	//	VK_DEBUG_REPORT_WARNING_BIT_EXT |
+	//	VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT;
+	callbackCreateInfo.flags = VK_DEBUG_REPORT_ERROR_BIT_EXT |
+		VK_DEBUG_REPORT_WARNING_BIT_EXT;
+	callbackCreateInfo.pfnCallback = &MyDebugReportCallback;
+	callbackCreateInfo.pUserData = nullptr;
+
+	/* Register the callback */
+	VkDebugReportCallbackEXT callback;
+	gVkLastRes = vkCreateDebugReportCallbackEXT(gVkInstance, &callbackCreateInfo, nullptr, &callback);
+	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkCreateDebugReportCallbackEXT);
+#endif
+
 	initializeMainPhysicalDevice(isValidPhysicalDeviceHeuristic);
 
-	initializeMainDevice();
+	uint32_t deviceLayerCount = 0;
+	std::vector<VkLayerProperties> deviceLayerProperties;
+
+	APPLY_2STEPS_QUERY_TO_COUNT_AND_VECTOR_1PARAM(vkEnumerateDeviceLayerProperties, gVkPhysicalDevice,
+		deviceLayerCount, deviceLayerProperties);
+
+	uint32_t deviceLayerExtCount = 0;
+	std::vector<VkExtensionProperties> deviceLayerExtProperties;
+
+	APPLY_2STEPS_QUERY_TO_COUNT_AND_VECTOR_2PARAM(vkEnumerateDeviceExtensionProperties, gVkPhysicalDevice, "VK_LAYER_LUNARG_standard_validation",
+		deviceLayerExtCount, deviceLayerExtProperties);
+
+	uint32_t deviceGlobalExtCount = 0;
+	std::vector<VkExtensionProperties> deviceGlobalExtProperties;
+
+	APPLY_2STEPS_QUERY_TO_COUNT_AND_VECTOR_2PARAM(vkEnumerateDeviceExtensionProperties, gVkPhysicalDevice, "VK_LAYER_LUNARG_standard_validation",
+		deviceGlobalExtCount, deviceGlobalExtProperties);
+
+	std::vector<const char*> enabledDeviceExtensions;
+
+	enabledDeviceExtensions.push_back("VK_KHR_swapchain");
+
+	std::vector<const char*> enabledDeviceLayers;
+
+#if !NDEBUG
+	enabledDeviceLayers.push_back("VK_LAYER_LUNARG_standard_validation");
+#endif
+
+	initializeMainDevice(static_cast<uint32_t>(enabledDeviceLayers.size()), enabledDeviceLayers.data(),
+		static_cast<uint32_t>(enabledDeviceExtensions.size()), enabledDeviceExtensions.data());
 
 	// TODO These queues should be properly created and retrieved via initializeMainDevice() through some parameterization
 	vkGetDeviceQueue(gVkDevice, 0, 0, &gVkGraphicsQueue);
@@ -914,6 +1118,29 @@ int main()
 	VkPipelineDynamicStateCreateInfo dynamicStateCreateInfo;
 	(void)dynamicStateCreateInfo;
 
+	// DESCRIPTOR SETS
+
+	VkDescriptorSetLayout descriptorSetLayout;
+
+	VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo;
+
+	VkDescriptorSetLayoutBinding descriptorSetLayoutBindings[1];
+
+	descriptorSetLayoutBindings[0].binding = 0;
+	descriptorSetLayoutBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	descriptorSetLayoutBindings[0].descriptorCount = 1u;
+	descriptorSetLayoutBindings[0].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+	descriptorSetLayoutBindings[0].pImmutableSamplers = nullptr;
+
+	descriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+	descriptorSetLayoutCreateInfo.pNext = nullptr;
+	descriptorSetLayoutCreateInfo.flags = 0; // reserved for future use
+	descriptorSetLayoutCreateInfo.bindingCount = 1;
+	descriptorSetLayoutCreateInfo.pBindings = descriptorSetLayoutBindings;
+
+	gVkLastRes = vkCreateDescriptorSetLayout(gVkDevice, &descriptorSetLayoutCreateInfo, nullptr, &descriptorSetLayout);
+	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkCreateDescriptorSetLayout);
+
 	// PIPELINE LAYOUT
 
 	VkPipelineLayout pipelineLayout;
@@ -923,8 +1150,8 @@ int main()
 	pipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
 	pipelineLayoutCreateInfo.pNext = nullptr;
 	pipelineLayoutCreateInfo.flags = 0; // reserved for future use
-	pipelineLayoutCreateInfo.setLayoutCount = 0u;
-	pipelineLayoutCreateInfo.pSetLayouts = nullptr;
+	pipelineLayoutCreateInfo.setLayoutCount = 1u;
+	pipelineLayoutCreateInfo.pSetLayouts = &descriptorSetLayout;
 	pipelineLayoutCreateInfo.pushConstantRangeCount = 0u;
 	pipelineLayoutCreateInfo.pPushConstantRanges = nullptr;
 
@@ -982,6 +1209,103 @@ int main()
 		exit_eprintf("Could not find any suitable device memory\n");
 	}
 #endif
+
+	// DESCRIPTOR POOL
+
+	VkDescriptorPoolCreateInfo descriptorPoolCreateInfo;
+
+	VkDescriptorPoolSize descriptorPoolSize_simple;
+
+	descriptorPoolSize_simple.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	descriptorPoolSize_simple.descriptorCount = 1u;
+
+	descriptorPoolCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+	descriptorPoolCreateInfo.pNext = nullptr;
+	descriptorPoolCreateInfo.flags = 0u; // Reset the pool per frame for now
+	descriptorPoolCreateInfo.maxSets = 1u;
+	descriptorPoolCreateInfo.poolSizeCount = 1u;
+	descriptorPoolCreateInfo.pPoolSizes = &descriptorPoolSize_simple;
+
+	VkDescriptorPool descriptorPool;
+
+	gVkLastRes = vkCreateDescriptorPool(gVkDevice, &descriptorPoolCreateInfo, nullptr, &descriptorPool);
+	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkCreateDescriptorPool);
+
+	VkDescriptorSet descriptorSet;
+
+	VkDescriptorSetAllocateInfo descriptorSetAllocateInfo;
+
+	descriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+	descriptorSetAllocateInfo.pNext = nullptr;
+	descriptorSetAllocateInfo.descriptorPool = descriptorPool;
+	descriptorSetAllocateInfo.descriptorSetCount = 1u;
+	descriptorSetAllocateInfo.pSetLayouts = &descriptorSetLayout;
+
+	gVkLastRes = vkAllocateDescriptorSets(gVkDevice, &descriptorSetAllocateInfo, &descriptorSet);
+	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkAllocateDescriptorSets);
+
+	// UPLOAD SIMPLE DESCRIPTOR SET ONCE (simple triangle color here)
+
+	// FRAGMENT SIMPLE UNIFORM BUFFER SETUP
+
+	VkBuffer fragUniformBuffer;
+
+	const VkDeviceSize fragUniformBufferSize = VkDeviceSize{ 16 };
+
+	createSimpleBuffer(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, fragUniformBufferSize, &fragUniformBuffer);
+
+	VkDeviceMemory fragUniformBufferMemory; // TODO use same memory zone for all buffers
+
+	allocateNewBufferMemory(&fragUniformBuffer, &fragUniformBufferMemory, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+
+	gVkLastRes = vkBindBufferMemory(gVkDevice, fragUniformBuffer, fragUniformBufferMemory, 0ul);
+	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkBindBufferMemory);
+
+	VkMappedMemoryRange fragUniformMemoryRange;
+
+	fragUniformMemoryRange.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+	fragUniformMemoryRange.pNext = nullptr;
+	fragUniformMemoryRange.memory = fragUniformBufferMemory;
+	fragUniformMemoryRange.offset = VkDeviceSize{ 0 };
+	fragUniformMemoryRange.size = fragUniformBufferSize;
+
+	void* fragUniformMapAddr;
+	gVkLastRes = vkMapMemory(gVkDevice, fragUniformMemoryRange.memory, fragUniformMemoryRange.offset, fragUniformMemoryRange.size,
+		0, &fragUniformMapAddr);
+	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkMapMemory);
+
+	// Do Writes
+	float triangleColor[] = { 0.f, 1.f, 0.f, 1.f };
+
+	memcpy(fragUniformMapAddr, triangleColor, sizeof(triangleColor));
+
+	gVkLastRes = vkFlushMappedMemoryRanges(gVkDevice, 1u, &fragUniformMemoryRange);
+	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkFlushMappedMemoryRanges);
+
+	vkUnmapMemory(gVkDevice, fragUniformBufferMemory);
+
+	VkWriteDescriptorSet descriptorWrite;
+
+	VkDescriptorBufferInfo descriptorBufferInfo;
+
+	descriptorBufferInfo.buffer = fragUniformBuffer;
+	descriptorBufferInfo.offset = VkDeviceSize{ 0 };
+	descriptorBufferInfo.range = VK_WHOLE_SIZE; // ? Check that after buffer creation has been done
+
+	descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	descriptorWrite.pNext = nullptr;
+	descriptorWrite.dstSet = descriptorSet;
+	descriptorWrite.dstBinding = 0u;
+	descriptorWrite.dstArrayElement = 0u;
+	descriptorWrite.descriptorCount = 1u;
+	descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	descriptorWrite.pImageInfo = nullptr;
+	descriptorWrite.pBufferInfo = &descriptorBufferInfo;
+	descriptorWrite.pTexelBufferView = nullptr;
+
+	vkUpdateDescriptorSets(gVkDevice, 1u, &descriptorWrite, 0u, nullptr);
+
+	std::vector<bool> aIsFirstSwapImageUse(gSwapchainImageCount, true);
 
 	/* Loop until the user closes the window */
 	while (!glfwWindowShouldClose(gGLFWwindow))
@@ -1056,7 +1380,7 @@ int main()
 
 		VkClearValue clearValue;
 
-		clearValue.color = { 0.3f, 0.3f, 0.3f, 1.f };
+		clearValue.color = { 0.f, 0.f, 0.f, 1.f };
 
 		VkRenderPassBeginInfo renderPassBeginInfo;
 
@@ -1073,6 +1397,32 @@ int main()
 		gVkLastRes = vkBeginCommandBuffer(drawTriangleCmdBuffer, &drawTriangleCmdBufferBeginInfo);
 		VKFN_LAST_RES_SUCCESS_OR_QUIT(vkBeginCommandBuffer);
 
+		// TRANSITION RENDERTARGET FROM PRESENTABLE TO RENDERABLE LAYOUT + Initial transition from UNDEFINED layout
+
+		VkImageMemoryBarrier acquireImageBarrier;
+
+		VkImageSubresourceRange acquireImageSubresourceRange; 
+		
+		acquireImageSubresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		acquireImageSubresourceRange.baseMipLevel = 0u;
+		acquireImageSubresourceRange.levelCount = 1u;
+		acquireImageSubresourceRange.baseArrayLayer = 0u;
+		acquireImageSubresourceRange.layerCount = 1u;
+
+		acquireImageBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+		acquireImageBarrier.pNext = nullptr;
+		acquireImageBarrier.srcAccessMask = aIsFirstSwapImageUse[currentSwapImageIndex] ? 0 : VK_ACCESS_MEMORY_READ_BIT;
+		acquireImageBarrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+		acquireImageBarrier.oldLayout = aIsFirstSwapImageUse[currentSwapImageIndex] ? VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+		acquireImageBarrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+		acquireImageBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		acquireImageBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		acquireImageBarrier.image = gaSwapImages[currentSwapImageIndex];
+		acquireImageBarrier.subresourceRange = acquireImageSubresourceRange;
+		
+		vkCmdPipelineBarrier(drawTriangleCmdBuffer, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+					0, 0u, nullptr, 0u, nullptr, 1u, &acquireImageBarrier);
+
 
 		/* RECORD DRAW CALL CMDS HERE */
 		vkCmdBeginRenderPass(drawTriangleCmdBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
@@ -1080,7 +1430,7 @@ int main()
 		vkCmdBindPipeline(drawTriangleCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
 
 		// TODO activate this once descriptors are needed
-		//vkCmdBindDescriptorSets(drawTriangleCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0u, 0u, nullptr, 0u, nullptr);
+		vkCmdBindDescriptorSets(drawTriangleCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0u, 1u, &descriptorSet, 0u, nullptr);
 
 		vkCmdBindIndexBuffer(drawTriangleCmdBuffer, indexBuffer, 0u, VK_INDEX_TYPE_UINT32);
 
@@ -1090,6 +1440,33 @@ int main()
 		vkCmdDrawIndexed(drawTriangleCmdBuffer, 3u, 1u, 0u, 0u, 0u);
 
 		vkCmdEndRenderPass(drawTriangleCmdBuffer);
+
+
+		// TRANSITION RENDERTARGET FROM RENDERABLE TO PRESENTABLE LAYOUT
+
+		VkImageMemoryBarrier presentImageBarrier;
+
+		VkImageSubresourceRange presentImageSubresourceRange;
+
+		presentImageSubresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		presentImageSubresourceRange.baseMipLevel = 0u;
+		presentImageSubresourceRange.levelCount = 1u;
+		presentImageSubresourceRange.baseArrayLayer = 0u;
+		presentImageSubresourceRange.layerCount = 1u;
+
+		presentImageBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+		presentImageBarrier.pNext = nullptr;
+		presentImageBarrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+		presentImageBarrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+		presentImageBarrier.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+		presentImageBarrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+		presentImageBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		presentImageBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		presentImageBarrier.image = gaSwapImages[currentSwapImageIndex];
+		presentImageBarrier.subresourceRange = presentImageSubresourceRange;
+
+		vkCmdPipelineBarrier(drawTriangleCmdBuffer, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+			0, 0u, nullptr, 0u, nullptr, 1u, &presentImageBarrier);
 
 
 		gVkLastRes = vkEndCommandBuffer(drawTriangleCmdBuffer);
@@ -1135,12 +1512,20 @@ int main()
 		using namespace std::chrono_literals;
 		std::this_thread::sleep_for(16ms);
 
-		//printf("Rendered\n");
-
 		/* Swap front and back buffers */
 
 		/* Poll for and process events */
 		glfwPollEvents();
+
+		aIsFirstSwapImageUse[currentSwapImageIndex] = false;
+
+		// INNER LOOP RESOURCES FREEING (TODO Move most of them outside, reuse pool, cmd buffer and predeclared per swap image framebuffer)
+
+		gVkLastRes = vkDeviceWaitIdle(gVkDevice);
+		VKFN_LAST_RES_SUCCESS_OR_QUIT(vkDeviceWaitIdle);
+
+		vkDestroyCommandPool(gVkDevice, cmdPool, nullptr);
+		vkDestroyFramebuffer(gVkDevice, framebuffer, nullptr);
 	}
 
 	gVkLastRes = vkDeviceWaitIdle(gVkDevice);
@@ -1148,12 +1533,46 @@ int main()
 
 	// Destroy children here
 
+	vkDestroySemaphore(gVkDevice, imageAcquiredSemaphore, nullptr);
+	vkDestroySemaphore(gVkDevice, renderingCompleteSemaphore, nullptr);
+
+	vkFreeMemory(gVkDevice, vertexBufferMemory, nullptr);
+	vkFreeMemory(gVkDevice, indexBufferMemory, nullptr);
+	vkFreeMemory(gVkDevice, fragUniformBufferMemory, nullptr);
+
+	vkDestroyBuffer(gVkDevice, vertexBuffer, nullptr);
+	vkDestroyBuffer(gVkDevice, indexBuffer, nullptr);
+	vkDestroyBuffer(gVkDevice, fragUniformBuffer, nullptr);
+
+	for (VkImageView& swapChainView : gaSwapViews) {
+		vkDestroyImageView(gVkDevice, swapChainView, nullptr);
+	}
+
+	// SWAP IMAGES ARE HANDLED BY THE SWAPCHAIN KHR IMPLEMENTATION
+
+	vkDestroyShaderModule(gVkDevice, vertexModule, nullptr);
+	vkDestroyShaderModule(gVkDevice, fragmentModule, nullptr);
+
+	vkDestroyPipelineLayout(gVkDevice, pipelineLayout, nullptr);
+
+	vkDestroyRenderPass(gVkDevice, renderPass, nullptr);
+
+	vkDestroyPipeline(gVkDevice, pipeline, nullptr);
+
+	vkDestroyDescriptorSetLayout(gVkDevice, descriptorSetLayout, nullptr);
+
+	vkDestroyDescriptorPool(gVkDevice, descriptorPool, nullptr);
+
+	vkDestroySwapchainKHR(gVkDevice, gVkSwapchain, nullptr);
+
 	// WARNING, all child ressource MUST be freed before destroying the device
 	vkDestroyDevice(gVkDevice, nullptr);
 
 	glfwTerminate();
 
 	vkDestroySurfaceKHR(gVkInstance, gVkSurface, nullptr);
+
+	vkDestroyDebugReportCallbackEXT(gVkInstance, callback, nullptr);
 
 	vkDestroyInstance(gVkInstance, nullptr);
 
