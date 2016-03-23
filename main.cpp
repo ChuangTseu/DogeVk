@@ -26,6 +26,11 @@ extern "C" { _declspec(dllexport) DWORD NvOptimusEnablement = 0x00000001; }; // 
 #include <tuple>
 #include <cassert>
 
+#include <glm/mat4x4.hpp>
+#include <glm/gtc/type_ptr.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/trigonometric.hpp>
+
 std::unique_ptr<char> readFileToCharBuffer(const char* szFilename, size_t* pOutBufferLength) {
 	std::ifstream fileSource;
 	fileSource.open(szFilename, std::ios::binary | std::ios::in | std::ios::ate);
@@ -145,6 +150,7 @@ const uint32_t engineVersion = makeApiVersionNumber(0u, 0u, 0u);
 const int WINDOW_WIDTH = 640; 
 const int WINDOW_HEIGHT = 480;
 
+float fakeTime = 0.f;
 
 #define VKFN_LAST_RES_SUCCESS_OR_QUIT(vkFn) if (gVkLastRes != VK_SUCCESS) { \
 	exit_eprintf(#vkFn " error : %d -> %s\n", gVkLastRes, VkEnumName(gVkLastRes)); \
@@ -622,6 +628,56 @@ VKAPI_ATTR VkBool32 VKAPI_CALL MyDebugReportCallback(
 		VKFN_LAST_RES_SUCCESS_OR_QUIT(fnVkQuery); \
 	}
 
+struct DedicatedBuffer {
+	enum HostTranferType {
+		eViaHostAccess,
+		eViaStaging,
+		eDeviceOnly
+	};
+
+	void Create(VkBufferUsageFlags usage, VkDeviceSize size, HostTranferType eTransferType) {
+		createSimpleBuffer(usage, size, &m_buffer);
+		allocateNewBufferMemory(&m_buffer, &m_memory, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+
+		gVkLastRes = vkBindBufferMemory(gVkDevice, m_buffer, m_memory, 0ul);
+		VKFN_LAST_RES_SUCCESS_OR_QUIT(vkBindBufferMemory);
+	}
+
+	void Destroy() {
+		vkFreeMemory(gVkDevice, m_memory, nullptr);
+		vkDestroyBuffer(gVkDevice, m_buffer, nullptr);
+	}
+
+	void UploadData(VkDeviceSize offset, VkDeviceSize size, const void* data) {
+		VkMappedMemoryRange mappedMemoryRange;
+
+		mappedMemoryRange.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+		mappedMemoryRange.pNext = nullptr;
+		mappedMemoryRange.memory = m_memory;
+		mappedMemoryRange.offset = offset;
+		mappedMemoryRange.size = size;
+
+		void* mapAddr;
+		gVkLastRes = vkMapMemory(gVkDevice, mappedMemoryRange.memory, mappedMemoryRange.offset, mappedMemoryRange.size,
+			0, &mapAddr);
+		VKFN_LAST_RES_SUCCESS_OR_QUIT(vkMapMemory);
+
+		memcpy(mapAddr, data, static_cast<size_t>(size));
+
+		gVkLastRes = vkFlushMappedMemoryRanges(gVkDevice, 1u, &mappedMemoryRange);
+		VKFN_LAST_RES_SUCCESS_OR_QUIT(vkFlushMappedMemoryRanges);
+
+		vkUnmapMemory(gVkDevice, m_memory);
+	}
+
+	VkBuffer m_buffer;
+	VkDeviceMemory m_memory;
+	HostTranferType m_eTransferType;
+	VkDeviceSize m_size;
+};
+
+/////////////////////////////////////////////// MAIN ///////////////////////////////////////////////
+
 int main()
 {
 	/* Initialize the library */
@@ -830,74 +886,113 @@ int main()
 
 	// VERTEX & INDEX BUFFER SETUP
 
-	const uint32_t vertexCount = 3u;
-	const uint32_t indexCount = 3u;
-	const VkDeviceSize sizeofVertex = 3*sizeof(float);
+	float simpleTriangleVertices[][3] = { { -0.5f, -0.5f, 0.f },{ 0.5f, -0.5f, 0.f },{ 0.f, 0.5f, 0.f } };
+	uint32_t simpleTriangleIndices[] = { 0u, 1u, 2u };
 
-	float vertices[vertexCount][3] = { { -0.5f, -0.5f, 0.f },{ 0.5f, -0.5f, 0.f },{ 0.f, 0.5f, 0.f } };
-	uint32_t indices[indexCount] = { 0u, 1u, 2u };
+	const uint32_t simpleTriangleVertexCount = std::size(simpleTriangleVertices);
+	const uint32_t simpleTriangleIndexCount = std::size(simpleTriangleIndices);
 
-	VkBuffer vertexBuffer;
-	VkBuffer indexBuffer;
+	const VkPrimitiveTopology simpleTrianglePrimitiveTopology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+	const uint32_t simpleTriangleInstanceCount = 1u;
 
-	const VkDeviceSize vertexBufferSize = vertexCount*sizeofVertex;
-	const VkDeviceSize indexBufferSize = indexCount*sizeof(uint32_t);
+	float cubeStripVertices[][3] = {
+		{ -0.5f, 0.5f, -0.5f },
+		{ 0.5f, 0.5f, -0.5f },
+		{ -0.5f, 0.5f, 0.5f },
+		{ 0.5f, 0.5f, 0.5f },
+		{ -0.5f, -0.5f, -0.5f },
+		{ 0.5f, -0.5f, -0.5f },
+		{ 0.5f, -0.5f, 0.5f },
+		{ -0.5f, -0.5f, 0.5f },
+	};
 
-	static_assert(vertexBufferSize == sizeof(vertices), "");
-	static_assert(indexBufferSize == sizeof(indices), "");
+	float cubeVertices[][3] = {
+		{ -1.0f, -1.0f, 1.0f },
+		{ 1.0f, -1.0f, 1.0f },
+		{ 1.0f, 1.0f, 1.0f },
+		{ -1.0f, 1.0f, 1.0f },
+		{ -1.0f, -1.0f, -1.0f },
+		{ 1.0f, -1.0f, -1.0f },
+		{ 1.0f, 1.0f, -1.0f },
+		{ -1.0f, 1.0f, -1.0f }
+	};
 
-	createSimpleBuffer(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, vertexBufferSize, &vertexBuffer);
-	createSimpleBuffer(VK_BUFFER_USAGE_INDEX_BUFFER_BIT, indexBufferSize, &indexBuffer);
+	for (auto vec3 : cubeVertices)
+		for (int i = 0; i < 3; ++i)
+			vec3[i] *= 0.5f;
 
-	VkDeviceMemory vertexBufferMemory; // TODO use same memory zone for all buffers
-	VkDeviceMemory indexBufferMemory; // TODO use same memory zone for all buffers
+	const uint32_t cubeVertexCount = std::size(cubeVertices);
 
-	allocateNewBufferMemory(&vertexBuffer, &vertexBufferMemory, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
-	allocateNewBufferMemory(&indexBuffer, &indexBufferMemory, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+	uint32_t cubeStripIndices[] = { 3u, 2u, 6u, 7u, 4u, 2u, 0u, 3u, 1u, 6u, 5u, 4u, 1u, 0u };
+	const uint32_t cubeStripIndexCount = std::size(cubeStripIndices);
+	const VkPrimitiveTopology cubeStripPrimitiveTopology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
+	const uint32_t cubeStripInstanceCount = 12u;
 
-	gVkLastRes = vkBindBufferMemory(gVkDevice, vertexBuffer, vertexBufferMemory, 0ul);
-	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkBindBufferMemory);
+	uint32_t cubeIndices[] = {
+		0, 1, 2,
+		2, 3, 0,
+		3, 2, 6,
+		6, 7, 3,
+		7, 6, 5,
+		5, 4, 7,
+		4, 0, 3,
+		3, 7, 4,
+		0, 1, 5,
+		5, 4, 0,
+		1, 5, 6,
+		6, 2, 1
+	};
+	const VkPrimitiveTopology cubePrimitiveTopology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+	const uint32_t cubeInstanceCount = 12u;
+	const uint32_t cubeIndexCount = cubeInstanceCount*3u;
 
-	gVkLastRes = vkBindBufferMemory(gVkDevice, indexBuffer, indexBufferMemory, 0ul);
-	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkBindBufferMemory);
+#define MAIN_MODEL_IS_SIMPLE_TRIANGLE 0
+#define MAIN_MODEL_IS_CUBE 0
+#define MAIN_MODEL_IS_CUBE_STRIP 1
 
-	VkMappedMemoryRange vertexMappedMemoryRange;
+#if MAIN_MODEL_IS_SIMPLE_TRIANGLE
+	const VkPrimitiveTopology modelPrimitiveTopology = simpleTrianglePrimitiveTopology;
+	const uint32_t modelInstanceCount = simpleTriangleInstanceCount;
 
-	vertexMappedMemoryRange.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
-	vertexMappedMemoryRange.pNext = nullptr;
-	vertexMappedMemoryRange.memory = vertexBufferMemory;
-	vertexMappedMemoryRange.offset = 0u;
-	vertexMappedMemoryRange.size = vertexBufferSize;
+	const uint32_t modelVertexCount = simpleTriangleVertexCount;
+	float* modelVertices = &(simpleTriangleVertices[0][0]);
 
-	VkMappedMemoryRange indexMappedMemoryRange;
+	const uint32_t modelIndexCount = simpleTriangleIndexCount;
+	uint32_t* modelIndices = simpleTriangleIndices;
+#elif MAIN_MODEL_IS_CUBE
+	const VkPrimitiveTopology modelPrimitiveTopology = cubePrimitiveTopology;
+	const uint32_t modelInstanceCount = cubeInstanceCount;
 
-	indexMappedMemoryRange.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
-	indexMappedMemoryRange.pNext = nullptr;
-	indexMappedMemoryRange.memory = indexBufferMemory;
-	indexMappedMemoryRange.offset = 0u;
-	indexMappedMemoryRange.size = indexBufferSize;
+	const uint32_t modelVertexCount = cubeVertexCount;
+	float* modelVertices = &(cubeVertices[0][0]);
 
-	void* vertexMapAddr;
-	gVkLastRes = vkMapMemory(gVkDevice, vertexMappedMemoryRange.memory, vertexMappedMemoryRange.offset, vertexMappedMemoryRange.size, 
-		0, &vertexMapAddr);
-	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkMapMemory);
+	const uint32_t modelIndexCount = cubeIndexCount;
+	uint32_t* modelIndices = cubeIndices;
+#elif MAIN_MODEL_IS_CUBE_STRIP
+	const VkPrimitiveTopology modelPrimitiveTopology = cubeStripPrimitiveTopology;
+	const uint32_t modelInstanceCount = cubeStripInstanceCount;
 
-	void* indexMapAddr;
-	gVkLastRes = vkMapMemory(gVkDevice, indexMappedMemoryRange.memory, indexMappedMemoryRange.offset, indexMappedMemoryRange.size,
-		0, &indexMapAddr);
-	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkMapMemory);
+	const uint32_t modelVertexCount = cubeVertexCount;
+	float* modelVertices = &(cubeStripVertices[0][0]);
 
-	// Do Writes
-	memcpy(vertexMapAddr, vertices, vertexBufferSize);
-	memcpy(indexMapAddr, indices, indexBufferSize);
+	const uint32_t modelIndexCount = cubeStripIndexCount;
+	uint32_t* modelIndices = cubeStripIndices;
+#endif
 
-	VkMappedMemoryRange mappedMemoryRangeArray[] = { vertexMappedMemoryRange, indexMappedMemoryRange };
+	const VkDeviceSize sizeofVertex = 3 * sizeof(float);
 
-	gVkLastRes = vkFlushMappedMemoryRanges(gVkDevice, 2u, mappedMemoryRangeArray);
-	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkFlushMappedMemoryRanges);
+	DedicatedBuffer vertexBuffer;
+	DedicatedBuffer indexBuffer;
 
-	vkUnmapMemory(gVkDevice, vertexBufferMemory);
-	vkUnmapMemory(gVkDevice, indexBufferMemory);
+	const VkDeviceSize vertexBufferSize = modelVertexCount*sizeofVertex;
+	const VkDeviceSize indexBufferSize = modelIndexCount*sizeof(uint32_t);
+
+	// BUG BUG BUG BUG HERE : Don't know why, maybe I did something wrong, but the last vertex is zeroed out if not adding at least 4 to the buffer creation size
+	vertexBuffer.Create(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, vertexBufferSize + 4, DedicatedBuffer::eViaHostAccess);
+	indexBuffer.Create(VK_BUFFER_USAGE_INDEX_BUFFER_BIT, indexBufferSize, DedicatedBuffer::eViaHostAccess);
+
+	vertexBuffer.UploadData(VkDeviceSize{ 0 }, vertexBufferSize, modelVertices);
+	indexBuffer.UploadData(VkDeviceSize{ 0 }, indexBufferSize, modelIndices);
 
 	// FULL PIPELINE DESCRIPTION
 
@@ -987,7 +1082,7 @@ int main()
 
 	positionInputAttribDesc.location = 0u;
 	positionInputAttribDesc.binding = 0u;
-	positionInputAttribDesc.format = vertexCount == 3 ? VK_FORMAT_R32G32B32_SFLOAT : VK_FORMAT_R32G32B32A32_SFLOAT;
+	positionInputAttribDesc.format = modelVertexCount == 3 ? VK_FORMAT_R32G32B32_SFLOAT : VK_FORMAT_R32G32B32A32_SFLOAT;
 	positionInputAttribDesc.offset = 0u;
 
 	VkVertexInputAttributeDescription vertexInputAttribDescs[] = { positionInputAttribDesc };
@@ -1009,7 +1104,7 @@ int main()
 	inputAssemblyStateCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
 	inputAssemblyStateCreateInfo.pNext = nullptr;
 	inputAssemblyStateCreateInfo.flags = 0; // reserved for future use
-	inputAssemblyStateCreateInfo.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+	inputAssemblyStateCreateInfo.topology = modelPrimitiveTopology;
 	inputAssemblyStateCreateInfo.primitiveRestartEnable = VK_FALSE;
 
 	// PIPELINE VIEWPORT DESCRIPTION
@@ -1047,14 +1142,14 @@ int main()
 	rasterizationStateCreateInfo.flags = 0; // reserved for future use
 	rasterizationStateCreateInfo.depthClampEnable = VK_FALSE;
 	rasterizationStateCreateInfo.rasterizerDiscardEnable = VK_FALSE;
-	rasterizationStateCreateInfo.polygonMode = VK_POLYGON_MODE_FILL;
+	rasterizationStateCreateInfo.polygonMode = VK_POLYGON_MODE_LINE;
 	rasterizationStateCreateInfo.cullMode = VK_CULL_MODE_NONE;
 	rasterizationStateCreateInfo.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
 	rasterizationStateCreateInfo.depthBiasEnable = VK_FALSE;
 	rasterizationStateCreateInfo.depthBiasConstantFactor = 0.f;
 	rasterizationStateCreateInfo.depthBiasClamp = 0.0f;
 	rasterizationStateCreateInfo.depthBiasSlopeFactor = 0.f;
-	rasterizationStateCreateInfo.lineWidth = 0.f;
+	rasterizationStateCreateInfo.lineWidth = 1.f;
 
 	// PIPELINE MULTISAMPLE DESCRIPTION
 
@@ -1111,8 +1206,6 @@ int main()
 	colorblendStateCreateInfo.pAttachments = &singleColorBlendState;
 	colorblendStateCreateInfo.blendConstants; // ignore
 
-
-
 	// PIPELINE DYNAMIC DESCRIPTION
 
 	VkPipelineDynamicStateCreateInfo dynamicStateCreateInfo;
@@ -1120,25 +1213,42 @@ int main()
 
 	// DESCRIPTOR SETS
 
-	VkDescriptorSetLayout descriptorSetLayout;
+	VkDescriptorSetLayout descriptorSetLayouts[2];
 
-	VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo;
+	VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo[2];
 
-	VkDescriptorSetLayoutBinding descriptorSetLayoutBindings[1];
+	VkDescriptorSetLayoutBinding descriptorSetLayout0_Bindings[1];
 
-	descriptorSetLayoutBindings[0].binding = 0;
-	descriptorSetLayoutBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-	descriptorSetLayoutBindings[0].descriptorCount = 1u;
-	descriptorSetLayoutBindings[0].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-	descriptorSetLayoutBindings[0].pImmutableSamplers = nullptr;
+	descriptorSetLayout0_Bindings[0].binding = 0;
+	descriptorSetLayout0_Bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	descriptorSetLayout0_Bindings[0].descriptorCount = 1u;
+	descriptorSetLayout0_Bindings[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+	descriptorSetLayout0_Bindings[0].pImmutableSamplers = nullptr;
 
-	descriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-	descriptorSetLayoutCreateInfo.pNext = nullptr;
-	descriptorSetLayoutCreateInfo.flags = 0; // reserved for future use
-	descriptorSetLayoutCreateInfo.bindingCount = 1;
-	descriptorSetLayoutCreateInfo.pBindings = descriptorSetLayoutBindings;
+	descriptorSetLayoutCreateInfo[0].sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+	descriptorSetLayoutCreateInfo[0].pNext = nullptr;
+	descriptorSetLayoutCreateInfo[0].flags = 0; // reserved for future use
+	descriptorSetLayoutCreateInfo[0].bindingCount = 1;
+	descriptorSetLayoutCreateInfo[0].pBindings = descriptorSetLayout0_Bindings;
 
-	gVkLastRes = vkCreateDescriptorSetLayout(gVkDevice, &descriptorSetLayoutCreateInfo, nullptr, &descriptorSetLayout);
+	gVkLastRes = vkCreateDescriptorSetLayout(gVkDevice, &descriptorSetLayoutCreateInfo[0], nullptr, &descriptorSetLayouts[0]);
+	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkCreateDescriptorSetLayout);
+
+	VkDescriptorSetLayoutBinding descriptorSetLayout1_Bindings[1];
+
+	descriptorSetLayout1_Bindings[0].binding = 0;
+	descriptorSetLayout1_Bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	descriptorSetLayout1_Bindings[0].descriptorCount = 1u;
+	descriptorSetLayout1_Bindings[0].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+	descriptorSetLayout1_Bindings[0].pImmutableSamplers = nullptr;
+
+	descriptorSetLayoutCreateInfo[1].sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+	descriptorSetLayoutCreateInfo[1].pNext = nullptr;
+	descriptorSetLayoutCreateInfo[1].flags = 0; // reserved for future use
+	descriptorSetLayoutCreateInfo[1].bindingCount = 1;
+	descriptorSetLayoutCreateInfo[1].pBindings = descriptorSetLayout1_Bindings;
+
+	gVkLastRes = vkCreateDescriptorSetLayout(gVkDevice, &descriptorSetLayoutCreateInfo[1], nullptr, &descriptorSetLayouts[1]);
 	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkCreateDescriptorSetLayout);
 
 	// PIPELINE LAYOUT
@@ -1150,8 +1260,8 @@ int main()
 	pipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
 	pipelineLayoutCreateInfo.pNext = nullptr;
 	pipelineLayoutCreateInfo.flags = 0; // reserved for future use
-	pipelineLayoutCreateInfo.setLayoutCount = 1u;
-	pipelineLayoutCreateInfo.pSetLayouts = &descriptorSetLayout;
+	pipelineLayoutCreateInfo.setLayoutCount = 2u;
+	pipelineLayoutCreateInfo.pSetLayouts = descriptorSetLayouts;
 	pipelineLayoutCreateInfo.pushConstantRangeCount = 0u;
 	pipelineLayoutCreateInfo.pPushConstantRanges = nullptr;
 
@@ -1217,12 +1327,12 @@ int main()
 	VkDescriptorPoolSize descriptorPoolSize_simple;
 
 	descriptorPoolSize_simple.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-	descriptorPoolSize_simple.descriptorCount = 1u;
+	descriptorPoolSize_simple.descriptorCount = 2u;
 
 	descriptorPoolCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
 	descriptorPoolCreateInfo.pNext = nullptr;
 	descriptorPoolCreateInfo.flags = 0u; // Reset the pool per frame for now
-	descriptorPoolCreateInfo.maxSets = 1u;
+	descriptorPoolCreateInfo.maxSets = 2u;
 	descriptorPoolCreateInfo.poolSizeCount = 1u;
 	descriptorPoolCreateInfo.pPoolSizes = &descriptorPoolSize_simple;
 
@@ -1231,7 +1341,7 @@ int main()
 	gVkLastRes = vkCreateDescriptorPool(gVkDevice, &descriptorPoolCreateInfo, nullptr, &descriptorPool);
 	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkCreateDescriptorPool);
 
-	VkDescriptorSet descriptorSet;
+	VkDescriptorSet descriptorSets[2];
 
 	VkDescriptorSetAllocateInfo descriptorSetAllocateInfo;
 
@@ -1239,71 +1349,83 @@ int main()
 	descriptorSetAllocateInfo.pNext = nullptr;
 	descriptorSetAllocateInfo.descriptorPool = descriptorPool;
 	descriptorSetAllocateInfo.descriptorSetCount = 1u;
-	descriptorSetAllocateInfo.pSetLayouts = &descriptorSetLayout;
+	descriptorSetAllocateInfo.pSetLayouts = &descriptorSetLayouts[0];
 
-	gVkLastRes = vkAllocateDescriptorSets(gVkDevice, &descriptorSetAllocateInfo, &descriptorSet);
+	gVkLastRes = vkAllocateDescriptorSets(gVkDevice, &descriptorSetAllocateInfo, &descriptorSets[0]);
 	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkAllocateDescriptorSets);
 
-	// UPLOAD SIMPLE DESCRIPTOR SET ONCE (simple triangle color here)
+	descriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+	descriptorSetAllocateInfo.pNext = nullptr;
+	descriptorSetAllocateInfo.descriptorPool = descriptorPool;
+	descriptorSetAllocateInfo.descriptorSetCount = 1u;
+	descriptorSetAllocateInfo.pSetLayouts = &descriptorSetLayouts[1];
+
+	gVkLastRes = vkAllocateDescriptorSets(gVkDevice, &descriptorSetAllocateInfo, &descriptorSets[1]);
+	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkAllocateDescriptorSets);
+
+	// UPLOAD DESCRIPTOR SETS
 
 	// FRAGMENT SIMPLE UNIFORM BUFFER SETUP
 
-	VkBuffer fragUniformBuffer;
+	//VkBuffer fragUniformBuffer;
 
 	const VkDeviceSize fragUniformBufferSize = VkDeviceSize{ 16 };
 
-	createSimpleBuffer(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, fragUniformBufferSize, &fragUniformBuffer);
+	DedicatedBuffer fragUniformBuffer;
+	
+	fragUniformBuffer.Create(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, fragUniformBufferSize, DedicatedBuffer::eViaHostAccess);
 
-	VkDeviceMemory fragUniformBufferMemory; // TODO use same memory zone for all buffers
-
-	allocateNewBufferMemory(&fragUniformBuffer, &fragUniformBufferMemory, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
-
-	gVkLastRes = vkBindBufferMemory(gVkDevice, fragUniformBuffer, fragUniformBufferMemory, 0ul);
-	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkBindBufferMemory);
-
-	VkMappedMemoryRange fragUniformMemoryRange;
-
-	fragUniformMemoryRange.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
-	fragUniformMemoryRange.pNext = nullptr;
-	fragUniformMemoryRange.memory = fragUniformBufferMemory;
-	fragUniformMemoryRange.offset = VkDeviceSize{ 0 };
-	fragUniformMemoryRange.size = fragUniformBufferSize;
-
-	void* fragUniformMapAddr;
-	gVkLastRes = vkMapMemory(gVkDevice, fragUniformMemoryRange.memory, fragUniformMemoryRange.offset, fragUniformMemoryRange.size,
-		0, &fragUniformMapAddr);
-	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkMapMemory);
-
-	// Do Writes
 	float triangleColor[] = { 0.f, 1.f, 0.f, 1.f };
 
-	memcpy(fragUniformMapAddr, triangleColor, sizeof(triangleColor));
+	fragUniformBuffer.UploadData(0, sizeof(triangleColor), triangleColor);
 
-	gVkLastRes = vkFlushMappedMemoryRanges(gVkDevice, 1u, &fragUniformMemoryRange);
-	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkFlushMappedMemoryRanges);
+	// VERTEX UNIFORM BUFFER SETUP
 
-	vkUnmapMemory(gVkDevice, fragUniformBufferMemory);
+	const VkDeviceSize vertexUniformBufferSize = VkDeviceSize{ sizeof(glm::mat4) };
 
-	VkWriteDescriptorSet descriptorWrite;
+	DedicatedBuffer vertexUniformBuffer;
 
-	VkDescriptorBufferInfo descriptorBufferInfo;
+	vertexUniformBuffer.Create(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, vertexUniformBufferSize, DedicatedBuffer::eViaHostAccess);
 
-	descriptorBufferInfo.buffer = fragUniformBuffer;
-	descriptorBufferInfo.offset = VkDeviceSize{ 0 };
-	descriptorBufferInfo.range = VK_WHOLE_SIZE; // ? Check that after buffer creation has been done
+	vertexUniformBuffer.UploadData(0, 0, 0);
 
-	descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-	descriptorWrite.pNext = nullptr;
-	descriptorWrite.dstSet = descriptorSet;
-	descriptorWrite.dstBinding = 0u;
-	descriptorWrite.dstArrayElement = 0u;
-	descriptorWrite.descriptorCount = 1u;
-	descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-	descriptorWrite.pImageInfo = nullptr;
-	descriptorWrite.pBufferInfo = &descriptorBufferInfo;
-	descriptorWrite.pTexelBufferView = nullptr;
+	VkWriteDescriptorSet descriptorWrites[2];
 
-	vkUpdateDescriptorSets(gVkDevice, 1u, &descriptorWrite, 0u, nullptr);
+	VkDescriptorBufferInfo vertexDescriptorBufferInfo;
+
+	vertexDescriptorBufferInfo.buffer = vertexUniformBuffer.m_buffer;
+	vertexDescriptorBufferInfo.offset = VkDeviceSize{ 0 };
+	vertexDescriptorBufferInfo.range = VK_WHOLE_SIZE; // ? Check that after buffer creation has been done
+
+	descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	descriptorWrites[0].pNext = nullptr;
+	descriptorWrites[0].dstSet = descriptorSets[0];
+	descriptorWrites[0].dstBinding = 0u;
+	descriptorWrites[0].dstArrayElement = 0u;
+	descriptorWrites[0].descriptorCount = 1u;
+	descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	descriptorWrites[0].pImageInfo = nullptr;
+	descriptorWrites[0].pBufferInfo = &vertexDescriptorBufferInfo;
+	descriptorWrites[0].pTexelBufferView = nullptr;
+
+	VkDescriptorBufferInfo fragDescriptorBufferInfo;
+
+	fragDescriptorBufferInfo.buffer = fragUniformBuffer.m_buffer;
+	fragDescriptorBufferInfo.offset = VkDeviceSize{ 0 };
+	fragDescriptorBufferInfo.range = VK_WHOLE_SIZE; // ? Check that after buffer creation has been done
+
+	descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	descriptorWrites[1].pNext = nullptr;
+	descriptorWrites[1].dstSet = descriptorSets[1];
+	descriptorWrites[1].dstBinding = 0u;
+	descriptorWrites[1].dstArrayElement = 0u;
+	descriptorWrites[1].descriptorCount = 1u;
+	descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	descriptorWrites[1].pImageInfo = nullptr;
+	descriptorWrites[1].pBufferInfo = &fragDescriptorBufferInfo;
+	descriptorWrites[1].pTexelBufferView = nullptr;
+
+	vkUpdateDescriptorSets(gVkDevice, 2u, descriptorWrites, 0u, nullptr);
 
 	std::vector<bool> aIsFirstSwapImageUse(gSwapchainImageCount, true);
 
@@ -1316,10 +1438,6 @@ int main()
 		VKFN_LAST_RES_SUCCESS_OR_QUIT(vkAcquireNextImageKHR);
 
 		//////////////////////////////////////////////////////////////////
-
-		// DESCRIPTOR SET
-
-		// None currently
 
 		// FRAMEBUFFER
 
@@ -1430,14 +1548,14 @@ int main()
 		vkCmdBindPipeline(drawTriangleCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
 
 		// TODO activate this once descriptors are needed
-		vkCmdBindDescriptorSets(drawTriangleCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0u, 1u, &descriptorSet, 0u, nullptr);
+		vkCmdBindDescriptorSets(drawTriangleCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0u, 2u, descriptorSets, 0u, nullptr);
 
-		vkCmdBindIndexBuffer(drawTriangleCmdBuffer, indexBuffer, 0u, VK_INDEX_TYPE_UINT32);
+		vkCmdBindIndexBuffer(drawTriangleCmdBuffer, indexBuffer.m_buffer, 0u, VK_INDEX_TYPE_UINT32);
 
 		VkDeviceSize vertexBufferOffsetArray[] = { 0 };
-		vkCmdBindVertexBuffers(drawTriangleCmdBuffer, 0u, 1u, &vertexBuffer, vertexBufferOffsetArray);
+		vkCmdBindVertexBuffers(drawTriangleCmdBuffer, 0u, 1u, &vertexBuffer.m_buffer, vertexBufferOffsetArray);
 
-		vkCmdDrawIndexed(drawTriangleCmdBuffer, 3u, 1u, 0u, 0u, 0u);
+		vkCmdDrawIndexed(drawTriangleCmdBuffer, modelIndexCount, modelInstanceCount, 0u, 0u, 0u);
 
 		vkCmdEndRenderPass(drawTriangleCmdBuffer);
 
@@ -1526,6 +1644,27 @@ int main()
 
 		vkDestroyCommandPool(gVkDevice, cmdPool, nullptr);
 		vkDestroyFramebuffer(gVkDevice, framebuffer, nullptr);
+
+		// UPDATE WVP MATRIX
+
+		fakeTime += 0.1666f; // Fake time assuming 60 FPS
+
+		glm::mat4 world(1.f); // Single object with no transform in our simple sample
+
+		const float radius = 3.f;
+		const float timeFactor = 0.1f;
+		glm::vec3 eye(glm::cos(fakeTime*timeFactor)*radius, 0.f, glm::sin(fakeTime*timeFactor)*radius);
+		glm::mat4 view = glm::lookAt(eye/*glm::vec3(0.f, 0.f, -2.f)*/, glm::vec3(0.f, 0.f, 0.f), glm::vec3(0.f, 1.f, 0.f));
+
+		glm::mat4 projection = glm::perspective(45.f, (float)WINDOW_WIDTH / (float)WINDOW_HEIGHT, 0.1f, 100.f);
+
+		glm::mat4 WVP = projection * view * world;
+
+		vertexUniformBuffer.UploadData(0, sizeof(WVP), glm::value_ptr(WVP));
+
+		// Test per frame fragUniformBuffer modification
+		//float triangleColor[] = { ((float)rand()) / (float)RAND_MAX, ((float)rand()) / (float)RAND_MAX, ((float)rand()) / (float)RAND_MAX, 1.f };
+		//fragUniformBuffer.UploadData(0, sizeof(triangleColor), triangleColor);
 	}
 
 	gVkLastRes = vkDeviceWaitIdle(gVkDevice);
@@ -1533,16 +1672,13 @@ int main()
 
 	// Destroy children here
 
+	vertexBuffer.Destroy();
+	indexBuffer.Destroy();
+	fragUniformBuffer.Destroy();
+	vertexUniformBuffer.Destroy();
+
 	vkDestroySemaphore(gVkDevice, imageAcquiredSemaphore, nullptr);
 	vkDestroySemaphore(gVkDevice, renderingCompleteSemaphore, nullptr);
-
-	vkFreeMemory(gVkDevice, vertexBufferMemory, nullptr);
-	vkFreeMemory(gVkDevice, indexBufferMemory, nullptr);
-	vkFreeMemory(gVkDevice, fragUniformBufferMemory, nullptr);
-
-	vkDestroyBuffer(gVkDevice, vertexBuffer, nullptr);
-	vkDestroyBuffer(gVkDevice, indexBuffer, nullptr);
-	vkDestroyBuffer(gVkDevice, fragUniformBuffer, nullptr);
 
 	for (VkImageView& swapChainView : gaSwapViews) {
 		vkDestroyImageView(gVkDevice, swapChainView, nullptr);
@@ -1559,7 +1695,8 @@ int main()
 
 	vkDestroyPipeline(gVkDevice, pipeline, nullptr);
 
-	vkDestroyDescriptorSetLayout(gVkDevice, descriptorSetLayout, nullptr);
+	vkDestroyDescriptorSetLayout(gVkDevice, descriptorSetLayouts[0], nullptr);
+	vkDestroyDescriptorSetLayout(gVkDevice, descriptorSetLayouts[1], nullptr);
 
 	vkDestroyDescriptorPool(gVkDevice, descriptorPool, nullptr);
 

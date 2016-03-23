@@ -10,6 +10,12 @@ Message(STATUS "found sub-folder shared_sources")
 SET(BASE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 INCLUDE(${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists_include.txt)
 
+# ===============> GLM
+find_package(GLM)
+if(GLM_FOUND)
+  include_directories(${GLM_INCLUDE_DIR} )
+endif()
+
 if(MSVC)
   add_definitions(-D_CRT_SECURE_NO_WARNINGS)
 endif(MSVC)
