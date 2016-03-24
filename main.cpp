@@ -186,6 +186,13 @@ uint32_t gSwapchainImageCount;
 std::vector<VkImage> gaSwapImages;
 std::vector<VkImageView> gaSwapViews;
 
+VkImage gDepthStencilImage;
+VkDeviceMemory gDepthStencilImageMemory;
+VkImageView gDepthStencilView;
+
+const VkComponentMapping identityComponentMapping = { 
+	VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY };
+
 
 void initializeMainInstance(uint32_t enabledLayerCount, const char *const * ppEnabledLayerNames, 
 	uint32_t enabledExtensionCount, const char *const * ppEnabledExtensionNames) {
@@ -439,8 +446,6 @@ void initializeSwapchainImageViews() {
 
 	gaSwapViews.resize(gSwapchainImageCount);
 
-	const VkComponentMapping identityComponentMapping = { VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY };
-
 	VkImageSubresourceRange imageSubresourceRange;
 
 	imageSubresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -525,6 +530,58 @@ void allocateNewBufferMemory(const VkBuffer* pBuffer, VkDeviceMemory* pOutBuffer
 	gVkLastRes = vkAllocateMemory(gVkDevice, &bufferMemAllocInfo, nullptr, pOutBufferMemory);
 	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkAllocateMemory);
 }
+
+void allocateNewImageMemory(const VkImage* pImage, VkDeviceMemory* pOutImageMemory, VkMemoryPropertyFlags desiredMemTypeFlags) {
+	VkMemoryRequirements imageMemReqs;
+
+	vkGetImageMemoryRequirements(gVkDevice, *pImage, &imageMemReqs);
+
+	uint32_t imageMemTypeIndex = getOptimalMemTypeIndex(desiredMemTypeFlags, imageMemReqs.memoryTypeBits);
+
+	if (imageMemTypeIndex == UINT32_MAX) {
+		exit_eprintf("Could not find any suitable memory type for this image");
+	}
+
+	VkMemoryAllocateInfo imageMemAllocInfo;
+
+	imageMemAllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+	imageMemAllocInfo.pNext = nullptr;
+	imageMemAllocInfo.allocationSize = imageMemReqs.size;
+	imageMemAllocInfo.memoryTypeIndex = imageMemTypeIndex;
+
+	gVkLastRes = vkAllocateMemory(gVkDevice, &imageMemAllocInfo, nullptr, pOutImageMemory);
+	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkAllocateMemory);
+}
+
+void cmdTransitionSimpleImageFromInitialState(VkCommandBuffer cmdBuffer, VkImage image,
+	VkImageAspectFlagBits aspectMask, VkImageLayout initialLayout, VkImageLayout newLayout,
+	VkAccessFlags firstMemoryAccessMask, VkPipelineStageFlags firstDependentStage) {
+	assert(initialLayout == VK_IMAGE_LAYOUT_UNDEFINED || initialLayout == VK_IMAGE_LAYOUT_PREINITIALIZED);
+
+	VkImageMemoryBarrier imageBarrier;
+
+	VkImageSubresourceRange imageSubresourceRange;
+
+	imageSubresourceRange.aspectMask = aspectMask;
+	imageSubresourceRange.baseMipLevel = 0u;
+	imageSubresourceRange.levelCount = 1u;
+	imageSubresourceRange.baseArrayLayer = 0u;
+	imageSubresourceRange.layerCount = 1u;
+
+	imageBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+	imageBarrier.pNext = nullptr;
+	imageBarrier.srcAccessMask = 0;
+	imageBarrier.dstAccessMask = firstMemoryAccessMask;
+	imageBarrier.oldLayout = initialLayout;
+	imageBarrier.newLayout = newLayout;
+	imageBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	imageBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	imageBarrier.image = image;
+	imageBarrier.subresourceRange = imageSubresourceRange;
+
+	vkCmdPipelineBarrier(cmdBuffer, firstDependentStage, firstDependentStage,
+		0, 0u, nullptr, 0u, nullptr, 1u, &imageBarrier);
+};
 
 #define APPEND_FLAG_NAME_TO_STRING_IF_PRESENT(flags, flagBitDefine, flagsString) \
 	if (flags & flagBitDefine) flagsString += #flagBitDefine;
@@ -649,6 +706,9 @@ struct DedicatedBuffer {
 	}
 
 	void UploadData(VkDeviceSize offset, VkDeviceSize size, const void* data) {
+		assert(size != 0);
+		assert(data != nullptr);
+
 		VkMappedMemoryRange mappedMemoryRange;
 
 		mappedMemoryRange.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
@@ -831,22 +891,39 @@ int main()
 
 	// RENDER PASS SETUP
 
-	VkAttachmentDescription attachementDesc;
+	VkAttachmentDescription attachementDescs[2];
 
-	attachementDesc.flags = 0;
-	attachementDesc.format = gVkSwapchainFormat;
-	attachementDesc.samples = VK_SAMPLE_COUNT_1_BIT;
-	attachementDesc.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-	attachementDesc.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-	attachementDesc.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-	attachementDesc.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-	attachementDesc.initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL; // TODO check these
-	attachementDesc.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL; // TODO check these
+	// Spawchain Rendertarget attachment
+	attachementDescs[0].flags = 0;
+	attachementDescs[0].format = gVkSwapchainFormat;
+	attachementDescs[0].samples = VK_SAMPLE_COUNT_1_BIT;
+	attachementDescs[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+	attachementDescs[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+	attachementDescs[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+	attachementDescs[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+	attachementDescs[0].initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL; // TODO check these
+	attachementDescs[0].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL; // TODO check these
+
+	// DepthStencil attachment
+	attachementDescs[1].flags = 0;
+	attachementDescs[1].format = VK_FORMAT_D32_SFLOAT;
+	attachementDescs[1].samples = VK_SAMPLE_COUNT_1_BIT;
+	attachementDescs[1].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+	attachementDescs[1].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+	attachementDescs[1].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+	attachementDescs[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+	attachementDescs[1].initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+	attachementDescs[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
 	VkAttachmentReference simpleOutColorAttachementReference;
 
 	simpleOutColorAttachementReference.attachment = 0u;
 	simpleOutColorAttachementReference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+	VkAttachmentReference depthStencilAttachementReference;
+
+	depthStencilAttachementReference.attachment = 1u;
+	depthStencilAttachementReference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
 	VkSubpassDescription subpassDesc;
 
@@ -857,7 +934,7 @@ int main()
 	subpassDesc.colorAttachmentCount = 1u;
 	subpassDesc.pColorAttachments = &simpleOutColorAttachementReference;
 	subpassDesc.pResolveAttachments = nullptr;
-	subpassDesc.pDepthStencilAttachment = nullptr;
+	subpassDesc.pDepthStencilAttachment = &depthStencilAttachementReference;
 	subpassDesc.preserveAttachmentCount = 0u;
 	subpassDesc.pPreserveAttachments = nullptr;
 
@@ -866,8 +943,8 @@ int main()
 	renderPassCreateInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
 	renderPassCreateInfo.pNext = nullptr;
 	renderPassCreateInfo.flags = 0;
-	renderPassCreateInfo.attachmentCount = 1u;
-	renderPassCreateInfo.pAttachments = &attachementDesc;
+	renderPassCreateInfo.attachmentCount = 2u;
+	renderPassCreateInfo.pAttachments = attachementDescs;
 	renderPassCreateInfo.subpassCount = 1u;
 	renderPassCreateInfo.pSubpasses = &subpassDesc;
 	renderPassCreateInfo.dependencyCount = 0u;
@@ -881,8 +958,6 @@ int main()
 	// MEMORY INFOS QUERY
 
 	vkGetPhysicalDeviceMemoryProperties(gVkPhysicalDevice, &gVkPhysicalMemProperties);
-
-	VkMemoryPropertyFlags desiredMemTypeFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
 
 	// VERTEX & INDEX BUFFER SETUP
 
@@ -1143,8 +1218,8 @@ int main()
 	rasterizationStateCreateInfo.depthClampEnable = VK_FALSE;
 	rasterizationStateCreateInfo.rasterizerDiscardEnable = VK_FALSE;
 	rasterizationStateCreateInfo.polygonMode = VK_POLYGON_MODE_LINE;
-	rasterizationStateCreateInfo.cullMode = VK_CULL_MODE_NONE;
-	rasterizationStateCreateInfo.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+	rasterizationStateCreateInfo.cullMode = VK_CULL_MODE_BACK_BIT;
+	rasterizationStateCreateInfo.frontFace = VK_FRONT_FACE_CLOCKWISE;
 	rasterizationStateCreateInfo.depthBiasEnable = VK_FALSE;
 	rasterizationStateCreateInfo.depthBiasConstantFactor = 0.f;
 	rasterizationStateCreateInfo.depthBiasClamp = 0.0f;
@@ -1172,8 +1247,8 @@ int main()
 	depthstencilStateCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
 	depthstencilStateCreateInfo.pNext = nullptr;
 	depthstencilStateCreateInfo.flags = 0; // reserved for future use
-	depthstencilStateCreateInfo.depthTestEnable = VK_FALSE;
-	depthstencilStateCreateInfo.depthWriteEnable = VK_FALSE;
+	depthstencilStateCreateInfo.depthTestEnable = VK_TRUE;
+	depthstencilStateCreateInfo.depthWriteEnable = VK_TRUE;
 	depthstencilStateCreateInfo.depthCompareOp = VK_COMPARE_OP_LESS;
 	depthstencilStateCreateInfo.depthBoundsTestEnable = VK_FALSE;
 	depthstencilStateCreateInfo.stencilTestEnable = VK_FALSE;
@@ -1387,7 +1462,7 @@ int main()
 
 	vertexUniformBuffer.Create(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, vertexUniformBufferSize, DedicatedBuffer::eViaHostAccess);
 
-	vertexUniformBuffer.UploadData(0, 0, 0);
+	//vertexUniformBuffer.UploadData(0, 0, 0);
 
 	VkWriteDescriptorSet descriptorWrites[2];
 
@@ -1429,6 +1504,60 @@ int main()
 
 	std::vector<bool> aIsFirstSwapImageUse(gSwapchainImageCount, true);
 
+	// CREATE DEPTH STENTIL IMAGE AND VIEW
+
+	VkImageCreateInfo depthStencilImageCreateInfo;
+
+	uint32_t depthStencilImageQueueFamilyIndex = 0;
+
+	depthStencilImageCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+	depthStencilImageCreateInfo.pNext = nullptr;
+	depthStencilImageCreateInfo.flags = 0;
+	depthStencilImageCreateInfo.imageType = VK_IMAGE_TYPE_2D;
+	depthStencilImageCreateInfo.format = VK_FORMAT_D32_SFLOAT;
+	depthStencilImageCreateInfo.extent = { WINDOW_WIDTH, WINDOW_HEIGHT, 1 };
+	depthStencilImageCreateInfo.mipLevels = 1u;
+	depthStencilImageCreateInfo.arrayLayers = 1u;
+	depthStencilImageCreateInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+	depthStencilImageCreateInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+	depthStencilImageCreateInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+	depthStencilImageCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+	depthStencilImageCreateInfo.queueFamilyIndexCount = 1u;
+	depthStencilImageCreateInfo.pQueueFamilyIndices = &depthStencilImageQueueFamilyIndex;
+	depthStencilImageCreateInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+	gVkLastRes = vkCreateImage(gVkDevice, &depthStencilImageCreateInfo, nullptr, &gDepthStencilImage);
+	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkCreateImage);
+
+	allocateNewImageMemory(&gDepthStencilImage, &gDepthStencilImageMemory, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+	gVkLastRes = vkBindImageMemory(gVkDevice, gDepthStencilImage, gDepthStencilImageMemory, 0);
+	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkBindImageMemory);
+
+	VkImageSubresourceRange depthStencilImageSubresourceRange;
+
+	depthStencilImageSubresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+	depthStencilImageSubresourceRange.baseMipLevel = 0;
+	depthStencilImageSubresourceRange.levelCount = 1;
+	depthStencilImageSubresourceRange.baseArrayLayer = 0;
+	depthStencilImageSubresourceRange.layerCount = 1;
+
+	VkImageViewCreateInfo depthStencilViewCreateInfo;
+
+	depthStencilViewCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+	depthStencilViewCreateInfo.pNext = nullptr;
+	depthStencilViewCreateInfo.flags = 0; // reserved for future use
+	depthStencilViewCreateInfo.image = gDepthStencilImage;
+	depthStencilViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+	depthStencilViewCreateInfo.format = VK_FORMAT_D32_SFLOAT;
+	depthStencilViewCreateInfo.components = identityComponentMapping;
+	depthStencilViewCreateInfo.subresourceRange = depthStencilImageSubresourceRange;
+
+	gVkLastRes = vkCreateImageView(gVkDevice, &depthStencilViewCreateInfo, nullptr, &gDepthStencilView);
+	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkCreateImageView);
+
+	bool isFirstDepthStencilImageUse = true;
+
 	/* Loop until the user closes the window */
 	while (!glfwWindowShouldClose(gGLFWwindow))
 	{
@@ -1443,12 +1572,14 @@ int main()
 
 		VkFramebufferCreateInfo framebufferCreateInfo;
 
+		VkImageView framebufferAttachmentsViews[2] = { gaSwapViews[currentSwapImageIndex], gDepthStencilView };
+
 		framebufferCreateInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
 		framebufferCreateInfo.pNext = nullptr;
 		framebufferCreateInfo.flags = 0;
 		framebufferCreateInfo.renderPass = renderPass;
-		framebufferCreateInfo.attachmentCount = 1u;
-		framebufferCreateInfo.pAttachments = &gaSwapViews[currentSwapImageIndex];
+		framebufferCreateInfo.attachmentCount = 2u;
+		framebufferCreateInfo.pAttachments = framebufferAttachmentsViews;
 		framebufferCreateInfo.width = static_cast<uint32_t>(WINDOW_WIDTH);
 		framebufferCreateInfo.height = static_cast<uint32_t>(WINDOW_HEIGHT);
 		framebufferCreateInfo.layers = 1u;
@@ -1496,9 +1627,15 @@ int main()
 
 		// RENDER PASS LAUNCH
 
-		VkClearValue clearValue;
+		VkClearValue clearColorValue;
 
-		clearValue.color = { 0.f, 0.f, 0.f, 1.f };
+		clearColorValue.color = { 0.f, 0.f, 0.f, 1.f };
+
+		VkClearValue clearDepthStencilValue;
+
+		clearDepthStencilValue.depthStencil = { 1.f, 0 };
+
+		VkClearValue clearValues[2] = { clearColorValue , clearDepthStencilValue };
 
 		VkRenderPassBeginInfo renderPassBeginInfo;
 
@@ -1507,13 +1644,19 @@ int main()
 		renderPassBeginInfo.renderPass = renderPass;
 		renderPassBeginInfo.framebuffer = framebuffer;
 		renderPassBeginInfo.renderArea = { {0, 0}, {WINDOW_WIDTH, WINDOW_HEIGHT} };
-		renderPassBeginInfo.clearValueCount = 1u;
-		renderPassBeginInfo.pClearValues = &clearValue;
+		renderPassBeginInfo.clearValueCount = 2u;
+		renderPassBeginInfo.pClearValues = clearValues;
 
 		// REGISTER COMMAND BUFFER
 
 		gVkLastRes = vkBeginCommandBuffer(drawTriangleCmdBuffer, &drawTriangleCmdBufferBeginInfo);
 		VKFN_LAST_RES_SUCCESS_OR_QUIT(vkBeginCommandBuffer);
+
+		if (isFirstDepthStencilImageUse) {
+			cmdTransitionSimpleImageFromInitialState(drawTriangleCmdBuffer, gDepthStencilImage, VK_IMAGE_ASPECT_DEPTH_BIT,
+				VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+				VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT);
+		}		
 
 		// TRANSITION RENDERTARGET FROM PRESENTABLE TO RENDERABLE LAYOUT + Initial transition from UNDEFINED layout
 
@@ -1636,6 +1779,7 @@ int main()
 		glfwPollEvents();
 
 		aIsFirstSwapImageUse[currentSwapImageIndex] = false;
+		isFirstDepthStencilImageUse = false;
 
 		// INNER LOOP RESOURCES FREEING (TODO Move most of them outside, reuse pool, cmd buffer and predeclared per swap image framebuffer)
 
@@ -1685,6 +1829,10 @@ int main()
 	}
 
 	// SWAP IMAGES ARE HANDLED BY THE SWAPCHAIN KHR IMPLEMENTATION
+
+	vkFreeMemory(gVkDevice, gDepthStencilImageMemory, nullptr);
+	vkDestroyImageView(gVkDevice, gDepthStencilView, nullptr);
+	vkDestroyImage(gVkDevice, gDepthStencilImage, nullptr);
 
 	vkDestroyShaderModule(gVkDevice, vertexModule, nullptr);
 	vkDestroyShaderModule(gVkDevice, fragmentModule, nullptr);
