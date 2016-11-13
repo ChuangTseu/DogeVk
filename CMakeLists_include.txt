@@ -6,10 +6,6 @@ add_definitions(-DRESOURCE_DIRECTORY="${RESOURCE_DIRECTORY}/")
 Message(STATUS "BASE_DIRECTORY = ${BASE_DIRECTORY}")
 Message(STATUS "CMAKE_CURRENT_SOURCE_DIR = ${CMAKE_CURRENT_SOURCE_DIR}")
 
-# Specify the list of directories to search for cmake modules.
-set(CMAKE_MODULE_PATH
-    ${BASE_DIRECTORY}/cmake
-)
 
 set( CMAKE_FIND_ROOT_PATH "")
 
@@ -28,7 +24,7 @@ set(EXECUTABLE_OUTPUT_PATH
 # Set the default build to Release.  Note this doesn't do anything for the VS
 # default build target.
 if(NOT CMAKE_BUILD_TYPE)
-  set(CMAKE_BUILD_TYPE "Release" CACHE STRING
+  set(CMAKE_BUILD_TYPE "Debug" CACHE STRING
       "Choose the type of build, options are: Debug Release RelWithDebInfo MinSizeRel."
       FORCE)
 endif(NOT CMAKE_BUILD_TYPE)
@@ -143,70 +139,11 @@ macro(_copy_files_to_target target thefiles)
     endif()
 endmacro()
 
-# ===============> GLFW
-find_package(GLFW)
-if(GLFW_FOUND)
-  include_directories(${GLFW_INCLUDE_DIR} )
-endif()
-
-macro(_add_package_VulkanSDK)
-  find_package(VulkanSDK)  
-  if(VULKANSDK_FOUND)
-      Message(STATUS "--> using package VulkanSDK")
-      add_definitions(-DUSEVULKANSDK)
-      include_directories(${VULKANSDK_INCLUDE_DIR})
-    LIST(APPEND LIBRARIES_OPTIMIZED ${VULKAN_LIB} )
-      LIST(APPEND LIBRARIES_DEBUG ${VULKAN_LIB} )
-      LIST(APPEND PACKAGE_SOURCE_FILES ${VULKANSDK_HEADERS} )
-      source_group(OPTIX FILES  ${VULKANSDK_HEADERS} )
- else()
-     Message(STATUS "--> NOT using package VulkanSDK")
- endif()
-endmacro()
 
 #####################################################################################
 #
 set(PLATFORM_LIBRARIES)
 set(COMMON_SOURCE_FILES)
-
-#####################################################################################
-# GLFW library
-if(GLFW_FOUND)
-  message(STATUS "using GLFW library ${GLFW_LIBRARY}")
-  LIST(APPEND PLATFORM_LIBRARIES ${GLFW_LIBRARY})
-  add_definitions(-DUSE_GLFW)
-endif()
-
-include_directories(
-    ${BASE_DIRECTORY}/shared_sources
-)
-
-#####################################################################################
-# Macro to download a file from a URL
-#
-macro(_download_file _URL _TARGET _FORCE)
-  if(${_FORCE} OR (NOT EXISTS ${_TARGET}))
-    Message(STATUS "downloading ${_URL} ==> ${_TARGET}")
-    file(DOWNLOAD ${_URL} ${_TARGET} SHOW_PROGRESS)
-  else()
-    Message(STATUS "model ${_TARGET} already loaded...")
-  endif()
-endmacro()
-#
-# example: _download_files("${FILELIST}"  "http://..." "${BASE_DIRECTORY}/shared_external/..." ${MODELS_DOWNLOAD_FORCE} )
-#
-macro(_download_files _FILELIST _URL _TARGET _FORCE )
-  foreach(_FILE ${_FILELIST})
-    if(${_FORCE} OR (NOT EXISTS "${_TARGET}/${_FILE}"))
-      Message(STATUS "*******************************************")
-      Message(STATUS "downloading ${_URL}/${_FILE}\n ==>\n ${_TARGET}")
-      Message(STATUS "*******************************************")
-      file(DOWNLOAD ${_URL}/${_FILE} ${_TARGET}/${_FILE} SHOW_PROGRESS)
-    else()
-      Message(STATUS "model ${_FILE} already loaded...")
-    endif()
-  endforeach(_FILE)
-endmacro()
 
 #####################################################################################
 # Macro to add custom build for Spir-V
@@ -215,19 +152,19 @@ endmacro()
 #
 macro(_compile_GLSL _SOURCE _OUTPUT SOURCE_LIST)
   LIST(APPEND ${SOURCE_LIST} ${_SOURCE})
-  Message(STATUS "${GLSLANGVALIDATOR} -o ${_OUTPUT} -V ${_SOURCE}")
+  Message(STATUS "${GLSLC} ${_SOURCE} -o ${_OUTPUT}")
   Message(STATUS "${_OUTPUT} : ${_SOURCE}")
-  if(GLSLANGVALIDATOR)
+  if(GLSLC)
     add_custom_command(
       OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/${_OUTPUT}
-      COMMAND echo ${GLSLANGVALIDATOR} -o ${_OUTPUT} -V ${_SOURCE}
-      COMMAND ${GLSLANGVALIDATOR} -o ${_OUTPUT} -V ${_SOURCE}
+      COMMAND echo ${GLSLC} ${_SOURCE} -o ${_OUTPUT}
+      COMMAND ${GLSLC} ${_SOURCE} -o ${_OUTPUT}
       MAIN_DEPENDENCY ${_SOURCE}
       WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
       )
-  else(GLSLANGVALIDATOR)
-    MESSAGE(WARNING "could not find GLSLANGVALIDATOR to compile shaders")
-  endif(GLSLANGVALIDATOR)
+  else(GLSLC)
+    MESSAGE(WARNING "could not find GLSLC to compile shaders")
+  endif(GLSLC)
 endmacro()
 
 #####################################################################################
