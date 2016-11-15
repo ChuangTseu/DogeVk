@@ -285,7 +285,9 @@ void Forward::SetupFrameRenderResources()
 
 void Forward::TransitionInitiallyUndefinedImages()
 {
-
+	// WARNING ! No transitioning is done currently !
+	// Since I use a Nvidia card, this is not a problem for me as it is totally ignored.
+	// Will do once the 3D rendering part is cleanly separated from the present part.
 }
 
 void Forward::CleanupSetupOnlyResources()
