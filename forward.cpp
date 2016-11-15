@@ -9,6 +9,8 @@
 #include "memory.h"
 #include "global_descriptor_sets.h"
 
+#include <glm/gtc/type_ptr.hpp>
+
 Forward gForward;
 
 void Forward::SetupShaderStages()
@@ -180,16 +182,23 @@ void Forward::SetupRenderPass()
 	renderPassCreateInfo.subpassCount = 1u;
 	renderPassCreateInfo.pSubpasses = &subpassDesc;
 
-	renderPass = create_VkRenderPass(&renderPassCreateInfo);
+	mRenderPass = create_VkRenderPass(&renderPassCreateInfo);
 }
 
 void Forward::SetupPipelineLayout()
 {
+	VkPushConstantRange vertexPushConstantRange;
+	vertexPushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+	vertexPushConstantRange.offset = 0u;
+	vertexPushConstantRange.size = 64u; // mat4
+
 	auto pipelineLayoutCreateInfo = vkstruct<VkPipelineLayoutCreateInfo>();
 	pipelineLayoutCreateInfo.setLayoutCount = GlobalDescriptorSets::CB_COUNT;
 	pipelineLayoutCreateInfo.pSetLayouts = GlobalDescriptorSets::descriptorSetLayouts;
+	pipelineLayoutCreateInfo.pushConstantRangeCount = 1u;
+	pipelineLayoutCreateInfo.pPushConstantRanges = &vertexPushConstantRange;
 
-	gVkLastRes = vkCreatePipelineLayout(gDevice.VkHandle(), &pipelineLayoutCreateInfo, nullptr, &pipelineLayout);
+	gVkLastRes = vkCreatePipelineLayout(gDevice.VkHandle(), &pipelineLayoutCreateInfo, nullptr, &mPipelineLayout);
 	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkCreatePipelineLayout);
 }
 
@@ -208,69 +217,75 @@ void Forward::SetupGraphicsPipeline()
 	pipelineCreateInfo.pDepthStencilState = &depthstencilStateCreateInfo;
 	pipelineCreateInfo.pColorBlendState = &colorblendStateCreateInfo;
 	pipelineCreateInfo.pDynamicState = nullptr; // No dynamic state for this simple pipeline
-	pipelineCreateInfo.layout = pipelineLayout;
-	pipelineCreateInfo.renderPass = renderPass;
+	pipelineCreateInfo.layout = mPipelineLayout;
+	pipelineCreateInfo.renderPass = mRenderPass;
 	pipelineCreateInfo.subpass = 0u;
 
-	gVkLastRes = vkCreateGraphicsPipelines(gDevice.VkHandle(), VK_NULL_HANDLE, 1u, &pipelineCreateInfo, nullptr, &pipeline);
+	gVkLastRes = vkCreateGraphicsPipelines(gDevice.VkHandle(), VK_NULL_HANDLE, 1u, &pipelineCreateInfo, nullptr, &mPipeline);
 	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkCreateGraphicsPipelines);
+}
+
+void CreateDepthImageAndView(VkImage* image, VkImageView* view, VkDeviceMemory* memory, u32 w, u32 h, u32 queueFamilyIndex) {
+	auto depthImageCreateInfo = vkstruct<VkImageCreateInfo>();
+	depthImageCreateInfo.flags = 0;
+	depthImageCreateInfo.imageType = VK_IMAGE_TYPE_2D;
+	depthImageCreateInfo.format = VK_FORMAT_D32_SFLOAT;
+	depthImageCreateInfo.extent = { w, h, 1 };
+	depthImageCreateInfo.mipLevels = 1u;
+	depthImageCreateInfo.arrayLayers = 1u;
+	depthImageCreateInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+	depthImageCreateInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+	depthImageCreateInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+	depthImageCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+	depthImageCreateInfo.queueFamilyIndexCount = 1u;
+	depthImageCreateInfo.pQueueFamilyIndices = &queueFamilyIndex;
+	depthImageCreateInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+	gVkLastRes = vkCreateImage(gDevice.VkHandle(), &depthImageCreateInfo, nullptr, image);
+	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkCreateImage);
+
+	allocateNewImageMemory(image, memory, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+	gVkLastRes = vkBindImageMemory(gDevice.VkHandle(), *image, *memory, 0);
+	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkBindImageMemory);
+
+	VkImageSubresourceRange depthImageSubresourceRange;
+	depthImageSubresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+	depthImageSubresourceRange.baseMipLevel = 0;
+	depthImageSubresourceRange.levelCount = 1;
+	depthImageSubresourceRange.baseArrayLayer = 0;
+	depthImageSubresourceRange.layerCount = 1;
+
+	VkImageViewCreateInfo depthViewCreateInfo = vkstruct<VkImageViewCreateInfo>();
+	depthViewCreateInfo.image = *image;
+	depthViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+	depthViewCreateInfo.format = VK_FORMAT_D32_SFLOAT;
+	depthViewCreateInfo.components = identityComponentMapping;
+	depthViewCreateInfo.subresourceRange = depthImageSubresourceRange;
+
+	gVkLastRes = vkCreateImageView(gDevice.VkHandle(), &depthViewCreateInfo, nullptr, view);
+	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkCreateImageView);
 }
 
 void Forward::SetupRenderTargets()
 {
-	aIsFirstSwapImageUse = std::vector<bool>(gSwapChain.ImageCount(), true);
+	mDepthImages.resize(gSwapChain.ImageCount());
 
-	// CREATE DEPTH STENTIL IMAGE AND VIEW
-
-	u32 depthStencilImageQueueFamilyIndex = 0;
-
-	auto depthStencilImageCreateInfo = vkstruct<VkImageCreateInfo>();
-	depthStencilImageCreateInfo.flags = 0;
-	depthStencilImageCreateInfo.imageType = VK_IMAGE_TYPE_2D;
-	depthStencilImageCreateInfo.format = VK_FORMAT_D32_SFLOAT;
-	depthStencilImageCreateInfo.extent = { WINDOW_WIDTH, WINDOW_HEIGHT, 1 };
-	depthStencilImageCreateInfo.mipLevels = 1u;
-	depthStencilImageCreateInfo.arrayLayers = 1u;
-	depthStencilImageCreateInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-	depthStencilImageCreateInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-	depthStencilImageCreateInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-	depthStencilImageCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-	depthStencilImageCreateInfo.queueFamilyIndexCount = 1u;
-	depthStencilImageCreateInfo.pQueueFamilyIndices = &depthStencilImageQueueFamilyIndex;
-	depthStencilImageCreateInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-
-	gVkLastRes = vkCreateImage(gDevice.VkHandle(), &depthStencilImageCreateInfo, nullptr, &gDepthStencilImage);
-	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkCreateImage);
-
-	allocateNewImageMemory(&gDepthStencilImage, &gDepthStencilImageMemory, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-	gVkLastRes = vkBindImageMemory(gDevice.VkHandle(), gDepthStencilImage, gDepthStencilImageMemory, 0);
-	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkBindImageMemory);
-
-	VkImageSubresourceRange depthStencilImageSubresourceRange;
-	depthStencilImageSubresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-	depthStencilImageSubresourceRange.baseMipLevel = 0;
-	depthStencilImageSubresourceRange.levelCount = 1;
-	depthStencilImageSubresourceRange.baseArrayLayer = 0;
-	depthStencilImageSubresourceRange.layerCount = 1;
-
-	VkImageViewCreateInfo depthStencilViewCreateInfo = vkstruct<VkImageViewCreateInfo>();
-	depthStencilViewCreateInfo.image = gDepthStencilImage;
-	depthStencilViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-	depthStencilViewCreateInfo.format = VK_FORMAT_D32_SFLOAT;
-	depthStencilViewCreateInfo.components = identityComponentMapping;
-	depthStencilViewCreateInfo.subresourceRange = depthStencilImageSubresourceRange;
-
-	gVkLastRes = vkCreateImageView(gDevice.VkHandle(), &depthStencilViewCreateInfo, nullptr, &gDepthStencilView);
-	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkCreateImageView);
-
-	isFirstDepthStencilImageUse = true;
+	for (u32 i = 0; i < gSwapChain.ImageCount(); ++i) {
+		CreateDepthImageAndView(&mDepthImages[i].image, &mDepthImages[i].view, &mDepthImages[i].memory, WINDOW_WIDTH, WINDOW_HEIGHT, 0u);
+	}
 }
 
 void Forward::SetupFrameRenderResources()
 {
 	imageAcquiredSemaphore = create_VkSemaphore();
 	renderingCompleteSemaphore = create_VkSemaphore();
+}
+
+
+void Forward::TransitionInitiallyUndefinedImages()
+{
+
 }
 
 void Forward::CleanupSetupOnlyResources()
@@ -306,6 +321,140 @@ void cmdTransitionSimpleImageFromInitialState(
 		0, 0u, nullptr, 0u, nullptr, 1u, &imageBarrier);
 };
 
+
+void Forward::SetupCmdBufferPool()
+{
+	// COMMAND BUFFER (POOL)
+
+	auto cmdPoolCreateInfo = vkstruct<VkCommandPoolCreateInfo>();
+	cmdPoolCreateInfo.flags = 0;
+	cmdPoolCreateInfo.queueFamilyIndex = 0u;
+
+	gVkLastRes = vkCreateCommandPool(gDevice.VkHandle(), &cmdPoolCreateInfo, nullptr, &mCmdPool);
+	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkCreateCommandPool);
+}
+
+void Forward::CookSpawChainCmdBuffers(const Scene& scene)
+{
+	// COMMAND BUFFER
+	mDrawTriangleCmdBuffers.resize(gSwapChain.ImageCount());
+	mFramebuffers.resize(gSwapChain.ImageCount());
+
+	auto drawTriangleCmdBufferAllocInfo = vkstruct<VkCommandBufferAllocateInfo>();
+	drawTriangleCmdBufferAllocInfo.commandPool = mCmdPool;
+	drawTriangleCmdBufferAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	drawTriangleCmdBufferAllocInfo.commandBufferCount = gSwapChain.ImageCount();
+
+	gVkLastRes = vkAllocateCommandBuffers(gDevice.VkHandle(), &drawTriangleCmdBufferAllocInfo, mDrawTriangleCmdBuffers.data());
+	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkAllocateCommandBuffers);
+
+	VkClearValue clearColorValue;
+	clearColorValue.color = { 0.f, 0.f, 0.f, 1.f };
+	VkClearValue clearDepthStencilValue;
+	clearDepthStencilValue.depthStencil = { 1.f, 0 };
+
+	VkClearValue clearValues[2] = { clearColorValue , clearDepthStencilValue };
+
+	auto renderPassBeginInfo = vkstruct<VkRenderPassBeginInfo>();
+	renderPassBeginInfo.renderPass = mRenderPass;
+	renderPassBeginInfo.renderArea = { { 0, 0 },{ WINDOW_WIDTH, WINDOW_HEIGHT } };
+	renderPassBeginInfo.clearValueCount = 2u;
+	renderPassBeginInfo.pClearValues = clearValues;
+
+	auto framebufferCreateInfo = vkstruct<VkFramebufferCreateInfo>();
+	framebufferCreateInfo.flags = 0;
+	framebufferCreateInfo.renderPass = mRenderPass;
+	framebufferCreateInfo.attachmentCount = 2u;
+	framebufferCreateInfo.width = static_cast<u32>(WINDOW_WIDTH);
+	framebufferCreateInfo.height = static_cast<u32>(WINDOW_HEIGHT);
+	framebufferCreateInfo.layers = 1u;
+
+	for (u32 i = 0; i < gSwapChain.ImageCount(); ++i) {
+		VkImageView framebufferAttachmentsViews[2] = { gSwapChain.Views()[i], mDepthImages[i].view };
+		framebufferCreateInfo.pAttachments = framebufferAttachmentsViews;
+
+		gVkLastRes = vkCreateFramebuffer(gDevice.VkHandle(), &framebufferCreateInfo, nullptr, &mFramebuffers[i]);
+		VKFN_LAST_RES_SUCCESS_OR_QUIT(vkCreateFramebuffer);
+
+		renderPassBeginInfo.framebuffer = mFramebuffers[i];
+
+		auto drawTriangleCmdBufferBeginInfo = vkstruct<VkCommandBufferBeginInfo>();
+		drawTriangleCmdBufferBeginInfo.flags = 0;
+
+		// REGISTER COMMAND BUFFER
+
+		gVkLastRes = vkBeginCommandBuffer(mDrawTriangleCmdBuffers[i], &drawTriangleCmdBufferBeginInfo);
+		VKFN_LAST_RES_SUCCESS_OR_QUIT(vkBeginCommandBuffer);
+
+		// TRANSITION RENDERTARGET FROM PRESENTABLE TO RENDERABLE LAYOUT + Initial transition from UNDEFINED layout
+
+		VkImageSubresourceRange acquireImageSubresourceRange;
+		acquireImageSubresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		acquireImageSubresourceRange.baseMipLevel = 0u;
+		acquireImageSubresourceRange.levelCount = 1u;
+		acquireImageSubresourceRange.baseArrayLayer = 0u;
+		acquireImageSubresourceRange.layerCount = 1u;
+
+		auto acquireImageBarrier = vkstruct<VkImageMemoryBarrier>();
+		acquireImageBarrier.srcAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+		acquireImageBarrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+		acquireImageBarrier.oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+		acquireImageBarrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+		acquireImageBarrier.image = gSwapChain.Images()[i];
+		acquireImageBarrier.subresourceRange = acquireImageSubresourceRange;
+
+		vkCmdPipelineBarrier(mDrawTriangleCmdBuffers[i], VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+			0, 0u, nullptr, 0u, nullptr, 1u, &acquireImageBarrier);
+
+		vkCmdBeginRenderPass(mDrawTriangleCmdBuffers[i], &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+		vkCmdBindPipeline(mDrawTriangleCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, mPipeline);
+
+		vkCmdBindDescriptorSets(mDrawTriangleCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, mPipelineLayout,
+			0u, GlobalDescriptorSets::CB_COUNT, GlobalDescriptorSets::descriptorSets, 0u, nullptr);
+
+		vkCmdBindIndexBuffer(mDrawTriangleCmdBuffers[i], scene.indexBuffer.m_buffer, 0u, VK_INDEX_TYPE_UINT32);
+
+		VkDeviceSize vertexBufferOffsetArray[] = { 0 };
+		vkCmdBindVertexBuffers(mDrawTriangleCmdBuffers[i], 0u, 1u, &(scene.vertexBuffer.m_buffer), vertexBufferOffsetArray);
+
+		vkCmdDrawIndexed(mDrawTriangleCmdBuffers[i], scene.modelIndexCount, scene.modelInstanceCount, 0u, 0u, 0u);
+		// OR, ONLY IF REBUILDING THE BUFFER EACH FRAME, MIGHT UPLOAD VIA PUSH CONSTANT
+		//for (u32 modelIdx = 0; modelIdx < scene.modelInstanceCount; ++modelIdx) {
+		//	vkCmdPushConstants(mDrawTriangleCmdBuffers[i], mPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0u, 64u,
+		//		glm::value_ptr(GlobalDescriptorSets::GetMutableCBuffer<PerObjectCB>().g_world[modelIdx]));
+		//	vkCmdDrawIndexed(mDrawTriangleCmdBuffers[i], scene.modelIndexCount, 1, 0u, 0u, 0u);
+		//}
+
+		vkCmdEndRenderPass(mDrawTriangleCmdBuffers[i]);
+
+
+		// TRANSITION RENDERTARGET FROM RENDERABLE TO PRESENTABLE LAYOUT
+
+		VkImageSubresourceRange presentImageSubresourceRange;
+		presentImageSubresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		presentImageSubresourceRange.baseMipLevel = 0u;
+		presentImageSubresourceRange.levelCount = 1u;
+		presentImageSubresourceRange.baseArrayLayer = 0u;
+		presentImageSubresourceRange.layerCount = 1u;
+
+		auto presentImageBarrier = vkstruct<VkImageMemoryBarrier>();
+		presentImageBarrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+		presentImageBarrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+		presentImageBarrier.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+		presentImageBarrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+		presentImageBarrier.image = gSwapChain.Images()[i];
+		presentImageBarrier.subresourceRange = presentImageSubresourceRange;
+
+		vkCmdPipelineBarrier(mDrawTriangleCmdBuffers[i], VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+			0, 0u, nullptr, 0u, nullptr, 1u, &presentImageBarrier);
+
+
+		gVkLastRes = vkEndCommandBuffer(mDrawTriangleCmdBuffers[i]);
+		VKFN_LAST_RES_SUCCESS_OR_QUIT(vkEndCommandBuffer);
+	}
+}
+
 void Forward::SubmitFrameRender(const Scene& scene, VkQueue graphicQueue, VkQueue presentQueue)
 {
 	/* Render here */
@@ -313,138 +462,16 @@ void Forward::SubmitFrameRender(const Scene& scene, VkQueue graphicQueue, VkQueu
 	gVkLastRes = vkAcquireNextImageKHR(gDevice.VkHandle(), gSwapChain.VkHandle(), UINT64_MAX, imageAcquiredSemaphore, VK_NULL_HANDLE, &currentSwapImageIndex);
 	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkAcquireNextImageKHR);
 
-	//////////////////////////////////////////////////////////////////
+	//////////////////////////////////////////////////////////////////	
 
-	// FRAMEBUFFER
+	
 
-	VkImageView framebufferAttachmentsViews[2] = { gSwapChain.Views()[currentSwapImageIndex], gDepthStencilView };
+	//if (isFirstDepthStencilImageUse) {
+	//	cmdTransitionSimpleImageFromInitialState(drawTriangleCmdBuffer, gDepthStencilImage, VK_IMAGE_ASPECT_DEPTH_BIT,
+	//		VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+	//		VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT);
+	//}
 
-	auto framebufferCreateInfo = vkstruct<VkFramebufferCreateInfo>();
-	framebufferCreateInfo.flags = 0;
-	framebufferCreateInfo.renderPass = renderPass;
-	framebufferCreateInfo.attachmentCount = 2u;
-	framebufferCreateInfo.pAttachments = framebufferAttachmentsViews;
-	framebufferCreateInfo.width = static_cast<u32>(WINDOW_WIDTH);
-	framebufferCreateInfo.height = static_cast<u32>(WINDOW_HEIGHT);
-	framebufferCreateInfo.layers = 1u;
-
-	gVkLastRes = vkCreateFramebuffer(gDevice.VkHandle(), &framebufferCreateInfo, nullptr, &framebuffer);
-	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkCreateFramebuffer);
-
-	// COMMAND BUFFER (POOL)
-
-	auto cmdPoolCreateInfo = vkstruct<VkCommandPoolCreateInfo>();
-	// TODO create diverse pools with optimal support for either pure static cmd buffers or dynamic ones
-	cmdPoolCreateInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-	cmdPoolCreateInfo.queueFamilyIndex = 0u;
-
-	gVkLastRes = vkCreateCommandPool(gDevice.VkHandle(), &cmdPoolCreateInfo, nullptr, &cmdPool);
-	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkCreateCommandPool);
-
-	// COMMAND BUFFER
-
-	auto drawTriangleCmdBufferAllocInfo = vkstruct<VkCommandBufferAllocateInfo>();
-	drawTriangleCmdBufferAllocInfo.commandPool = cmdPool;
-	drawTriangleCmdBufferAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-	drawTriangleCmdBufferAllocInfo.commandBufferCount = 1u;
-
-	VkCommandBuffer drawTriangleCmdBuffer;
-	gVkLastRes = vkAllocateCommandBuffers(gDevice.VkHandle(), &drawTriangleCmdBufferAllocInfo, &drawTriangleCmdBuffer);
-	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkAllocateCommandBuffers);
-
-	auto drawTriangleCmdBufferBeginInfo = vkstruct<VkCommandBufferBeginInfo>();
-	drawTriangleCmdBufferBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT; // TODO learn more about flags in case of a more elaborate use
-
-	// RENDER PASS LAUNCH
-
-	VkClearValue clearColorValue;
-	clearColorValue.color = { 0.f, 0.f, 0.f, 1.f };
-
-	VkClearValue clearDepthStencilValue;
-	clearDepthStencilValue.depthStencil = { 1.f, 0 };
-
-	VkClearValue clearValues[2] = { clearColorValue , clearDepthStencilValue };
-
-	auto renderPassBeginInfo = vkstruct<VkRenderPassBeginInfo>();
-	renderPassBeginInfo.renderPass = renderPass;
-	renderPassBeginInfo.framebuffer = framebuffer;
-	renderPassBeginInfo.renderArea = { { 0, 0 },{ WINDOW_WIDTH, WINDOW_HEIGHT } };
-	renderPassBeginInfo.clearValueCount = 2u;
-	renderPassBeginInfo.pClearValues = clearValues;
-
-	// REGISTER COMMAND BUFFER
-
-	gVkLastRes = vkBeginCommandBuffer(drawTriangleCmdBuffer, &drawTriangleCmdBufferBeginInfo);
-	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkBeginCommandBuffer);
-
-	if (isFirstDepthStencilImageUse) {
-		cmdTransitionSimpleImageFromInitialState(drawTriangleCmdBuffer, gDepthStencilImage, VK_IMAGE_ASPECT_DEPTH_BIT,
-			VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-			VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT);
-	}
-
-	// TRANSITION RENDERTARGET FROM PRESENTABLE TO RENDERABLE LAYOUT + Initial transition from UNDEFINED layout
-
-	VkImageSubresourceRange acquireImageSubresourceRange;
-	acquireImageSubresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-	acquireImageSubresourceRange.baseMipLevel = 0u;
-	acquireImageSubresourceRange.levelCount = 1u;
-	acquireImageSubresourceRange.baseArrayLayer = 0u;
-	acquireImageSubresourceRange.layerCount = 1u;
-
-	auto acquireImageBarrier = vkstruct<VkImageMemoryBarrier>();
-	acquireImageBarrier.srcAccessMask = aIsFirstSwapImageUse[currentSwapImageIndex] ? 0 : VK_ACCESS_MEMORY_READ_BIT;
-	acquireImageBarrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-	acquireImageBarrier.oldLayout = aIsFirstSwapImageUse[currentSwapImageIndex] ? VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-	acquireImageBarrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-	acquireImageBarrier.image = gSwapChain.Images()[currentSwapImageIndex];
-	acquireImageBarrier.subresourceRange = acquireImageSubresourceRange;
-
-	vkCmdPipelineBarrier(drawTriangleCmdBuffer, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-		0, 0u, nullptr, 0u, nullptr, 1u, &acquireImageBarrier);
-
-
-	/* RECORD DRAW CALL CMDS HERE */
-	vkCmdBeginRenderPass(drawTriangleCmdBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
-
-	vkCmdBindPipeline(drawTriangleCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-
-	vkCmdBindDescriptorSets(drawTriangleCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 
-		0u, GlobalDescriptorSets::CB_COUNT, GlobalDescriptorSets::descriptorSets, 0u, nullptr);
-
-	vkCmdBindIndexBuffer(drawTriangleCmdBuffer, scene.indexBuffer.m_buffer, 0u, VK_INDEX_TYPE_UINT32);
-
-	VkDeviceSize vertexBufferOffsetArray[] = { 0 };
-	vkCmdBindVertexBuffers(drawTriangleCmdBuffer, 0u, 1u, &(scene.vertexBuffer.m_buffer), vertexBufferOffsetArray);
-
-	vkCmdDrawIndexed(drawTriangleCmdBuffer, scene.modelIndexCount, scene.modelInstanceCount, 0u, 0u, 0u);
-
-	vkCmdEndRenderPass(drawTriangleCmdBuffer);
-
-
-	// TRANSITION RENDERTARGET FROM RENDERABLE TO PRESENTABLE LAYOUT
-
-	VkImageSubresourceRange presentImageSubresourceRange;
-	presentImageSubresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-	presentImageSubresourceRange.baseMipLevel = 0u;
-	presentImageSubresourceRange.levelCount = 1u;
-	presentImageSubresourceRange.baseArrayLayer = 0u;
-	presentImageSubresourceRange.layerCount = 1u;
-
-	auto presentImageBarrier = vkstruct<VkImageMemoryBarrier>();
-	presentImageBarrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-	presentImageBarrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
-	presentImageBarrier.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-	presentImageBarrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-	presentImageBarrier.image = gSwapChain.Images()[currentSwapImageIndex];
-	presentImageBarrier.subresourceRange = presentImageSubresourceRange;
-
-	vkCmdPipelineBarrier(drawTriangleCmdBuffer, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-		0, 0u, nullptr, 0u, nullptr, 1u, &presentImageBarrier);
-
-
-	gVkLastRes = vkEndCommandBuffer(drawTriangleCmdBuffer);
-	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkEndCommandBuffer);
 
 	//////////////////////////////////////////////////////////////////
 
@@ -455,7 +482,7 @@ void Forward::SubmitFrameRender(const Scene& scene, VkQueue graphicQueue, VkQueu
 	submitInfo.pWaitSemaphores = &imageAcquiredSemaphore;
 	submitInfo.pWaitDstStageMask = waitSwapchainAcquiredAtStage;
 	submitInfo.commandBufferCount = 1u;
-	submitInfo.pCommandBuffers = &drawTriangleCmdBuffer;
+	submitInfo.pCommandBuffers = &mDrawTriangleCmdBuffers[currentSwapImageIndex];
 	submitInfo.signalSemaphoreCount = 1u;
 	submitInfo.pSignalSemaphores = &renderingCompleteSemaphore;
 
@@ -471,18 +498,8 @@ void Forward::SubmitFrameRender(const Scene& scene, VkQueue graphicQueue, VkQueu
 	presentInfo.pImageIndices = &currentSwapImageIndex;
 	presentInfo.pResults = nullptr;
 
-
 	gVkLastRes = vkQueuePresentKHR(presentQueue, &presentInfo);
 	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkQueuePresentKHR);
-
-	aIsFirstSwapImageUse[currentSwapImageIndex] = false;
-	isFirstDepthStencilImageUse = false;
-}
-
-void Forward::CleanupAfterFrame()
-{
-	vkDestroyCommandPool(gDevice.VkHandle(), cmdPool, nullptr);
-	vkDestroyFramebuffer(gDevice.VkHandle(), framebuffer, nullptr);
 }
 
 void Forward::Destroy()
@@ -490,13 +507,11 @@ void Forward::Destroy()
 	vkDestroySemaphore(gDevice.VkHandle(), imageAcquiredSemaphore, nullptr);
 	vkDestroySemaphore(gDevice.VkHandle(), renderingCompleteSemaphore, nullptr);
 
-	vkFreeMemory(gDevice.VkHandle(), gDepthStencilImageMemory, nullptr);
-	vkDestroyImageView(gDevice.VkHandle(), gDepthStencilView, nullptr);
-	vkDestroyImage(gDevice.VkHandle(), gDepthStencilImage, nullptr);
+	for (Image& image : mDepthImages) image.Destroy();
 
-	vkDestroyPipelineLayout(gDevice.VkHandle(), pipelineLayout, nullptr);
+	vkDestroyPipelineLayout(gDevice.VkHandle(), mPipelineLayout, nullptr);
 
-	vkDestroyRenderPass(gDevice.VkHandle(), renderPass, nullptr);
+	vkDestroyRenderPass(gDevice.VkHandle(), mRenderPass, nullptr);
 
-	vkDestroyPipeline(gDevice.VkHandle(), pipeline, nullptr);
+	vkDestroyPipeline(gDevice.VkHandle(), mPipeline, nullptr);
 }

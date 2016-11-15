@@ -76,41 +76,61 @@ enum GLFW_WASD {
 	RIGHT = GLFW_KEY_D
 };
 
+bool gEscapePressed = false;
+
 void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods)
 {
 	if (action == GLFW_PRESS || action == GLFW_REPEAT) {
+		if (key == GLFW_KEY_ESCAPE) {
+			gEscapePressed = true;
+			return;
+		}
+
 		if (key == GLFW_WASD::UP) {
-			std::cout << "UP\n";
+			//std::cout << "UP\n";
 			gCamera.StepAdvance(Camera::EStepAdvance_FORWARD);
 		}
 		else if (key == GLFW_WASD::LEFT) {
-			std::cout << "LEFT\n";
+			//std::cout << "LEFT\n";
 			gCamera.StepAdvance(Camera::EStepAdvance_LEFT);
 		}
 		else if (key == GLFW_WASD::DOWN) {
-			std::cout << "DOWN\n";
+			//std::cout << "DOWN\n";
 			gCamera.StepAdvance(Camera::EStepAdvance_BACKWARD);
 		}
 		else if (key == GLFW_WASD::RIGHT) {
-			std::cout << "RIGHT\n";
+			//std::cout << "RIGHT\n";
 			gCamera.StepAdvance(Camera::EStepAdvance_RIGHT);
 		}
 	}
 
 	if (action == GLFW_RELEASE) {
 		if (key == GLFW_WASD::UP) {
-			std::cout << "RELEASE UP\n";
+			//std::cout << "RELEASE UP\n";
 		}
 		else if (key == GLFW_WASD::LEFT) {
-			std::cout << "RELEASE LEFT\n";
+			//std::cout << "RELEASE LEFT\n";
 		}
 		else if (key == GLFW_WASD::DOWN) {
-			std::cout << "RELEASE DOWN\n";
+			//std::cout << "RELEASE DOWN\n";
 		}
 		else if (key == GLFW_WASD::RIGHT) {
-			std::cout << "RELEASE RIGHT\n";
+			//std::cout << "RELEASE RIGHT\n";
 		}
 	}
+}
+
+void cursor_pos_callback(GLFWwindow* window, double xpos, double ypos)
+{
+	static double prev_x = xpos, prev_y = ypos;
+
+	double rel_x = xpos - prev_x;
+	double rel_y = ypos - prev_y;
+
+	prev_x = xpos;
+	prev_y = ypos;
+
+	gCamera.RotateByMouseRelCoords((int)rel_x, (int)-rel_y);
 }
 
 /////////////////////////////////////////////// MAIN ///////////////////////////////////////////////
@@ -218,17 +238,27 @@ int main()
 	GlobalDescriptorSets::Initialize();
 
 	Forward forward;
-	forward.SetupPipeline();	
+	forward.SetupPipeline(scene);	
 
 	// Init camera
-	gCamera.SetPositionProperties(glm::vec3(3.f, 0.f, 0.f), glm::vec3(-1.f, 0.f, 0.f), glm::vec3(0.f, 1.f, 0.f));
+	gCamera.SetPositionProperties(glm::vec3(0.f, 0.f, -4.f), glm::vec3(0.f, 0.f, 1.f), glm::vec3(0.f, 1.f, 0.f));
 	gCamera.SetProjectionProperties(45.f, (float)WINDOW_WIDTH / (float)WINDOW_HEIGHT, 0.1f, 100.f);
 
 	//// SETUP GLFW events handling
 	glfwSetKeyCallback(gWindow.GLFWHandle(), key_callback);
+	glfwSetInputMode(gWindow.GLFWHandle(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+	glfwSetCursorPosCallback(gWindow.GLFWHandle(), cursor_pos_callback);
+
+	AppConfigCB& appConfigCB = GlobalDescriptorSets::GetMutableCBuffer<AppConfigCB>();
+	appConfigCB.g_globalColor = glm::vec3(1.f, 1.f, 0.f);
+	GlobalDescriptorSets::CommitCBuffer<AppConfigCB>();
+
+	PerObjectCB& perObjectCB = GlobalDescriptorSets::GetMutableCBuffer<PerObjectCB>();
+	perObjectCB.g_world[2] = glm::translate(glm::mat4(1.f), glm::vec3(2.5f, 0.f, 0.f));
+	GlobalDescriptorSets::CommitCBuffer<PerObjectCB>();
 
 	/* Loop until the user closes the window */
-	while (!glfwWindowShouldClose(gWindow.GLFWHandle()))
+	while (!glfwWindowShouldClose(gWindow.GLFWHandle()) && !gEscapePressed)
 	{
 		forward.SubmitFrameRender(scene, gVkGraphicsQueue, gVkPresentQueue);
 
@@ -247,25 +277,30 @@ int main()
 		gVkLastRes = vkDeviceWaitIdle(gDevice.VkHandle());
 		VKFN_LAST_RES_SUCCESS_OR_QUIT(vkDeviceWaitIdle);
 
-		forward.CleanupAfterFrame();
-
 		// UPDATE WVP MATRIX
 
 		fakeTime += 0.1666f; // Fake time assuming 60 FPS
 
 		const float timeFactor = 0.1f;
 
+		scene.UpdateScene(fakeTime);
+
 		glm::mat4 world = glm::translate(glm::mat4(1.f), glm::vec3(0.f, glm::sin(fakeTime*timeFactor), 0.f));
 
 		gCamera.UpdateLookAt();
-		glm::mat4 WVP = gCamera.GetViewProjection() * world;
 
 		PerViewPointCB& perViewPointCB = GlobalDescriptorSets::GetMutableCBuffer<PerViewPointCB>();
 		perViewPointCB.eyePosition = gCamera.GetPosition();
 		perViewPointCB.g_proj[0] = gCamera.GetProjection();
 		perViewPointCB.g_view[0] = gCamera.GetView();
-		perViewPointCB.g_viewProj[0] = WVP; // gCamera.GetViewProjection();
+		perViewPointCB.g_viewProj[0] = gCamera.GetViewProjection();
 		GlobalDescriptorSets::CommitCBuffer<PerViewPointCB>();
+
+		LightsCB& lightsCB = GlobalDescriptorSets::GetMutableCBuffer<LightsCB>();
+		lightsCB.dirLights[0].m_color = glm::vec3(1.f, 1.f, 1.f);
+		lightsCB.dirLights[0].m_direction = glm::vec3(glm::sin(fakeTime*timeFactor), 0.f, glm::cos(fakeTime*timeFactor));
+		lightsCB.numDirLights = 1;
+		GlobalDescriptorSets::CommitCBuffer<LightsCB>();
 
 		// Test per frame fragUniformBuffer modification
 		static bool bFirstRandomColor = true;
@@ -283,6 +318,10 @@ int main()
 	gVkLastRes = vkDeviceWaitIdle(gDevice.VkHandle());
 	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkDeviceWaitIdle);
 
+#if !NDEBUG
+	gDebugReport.Destroy();
+#endif
+
 	// Destroy children here
 
 	scene.Destroy();
@@ -296,10 +335,6 @@ int main()
 
 	glfwTerminate();
 	vkDestroySurfaceKHR(gInstance.VkHandle(), gSurface.VkHandle(), nullptr);
-
-#if !NDEBUG
-	gDebugReport.Destroy();
-#endif
 
 	vkDestroyInstance(gInstance.VkHandle(), nullptr);
 

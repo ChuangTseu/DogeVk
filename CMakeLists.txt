@@ -43,8 +43,10 @@ INCLUDE(${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists_include.txt)
 file(GLOB SOURCE_FILES *.cpp *.hpp *.inl *.h *.c)
 # file(GLOB GLSL_FILES *.glsl)
 
-_compile_GLSL("shaders/simple.vert" "shaders/simple_vert.spv" GLSL_FILES)
-_compile_GLSL("shaders/simple.frag" "shaders/simple_frag.spv" GLSL_FILES)
+set(GlobalShaderDependencies "shaders/global_descriptor_sets.h")
+
+_compile_GLSL("shaders/simple.vert" ${GlobalShaderDependencies} "shaders/simple_vert.spv" GLSL_FILES)
+_compile_GLSL("shaders/simple.frag" ${GlobalShaderDependencies} "shaders/simple_frag.spv" GLSL_FILES)
 
 Message("GLSL_FILES: ${GLSL_FILES}")
 

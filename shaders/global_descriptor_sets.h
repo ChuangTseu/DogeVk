@@ -15,18 +15,20 @@ layout( std140, set = 1, binding = 0 ) uniform PerViewPointCB {
 	vec3 g_eyePosition; // TODO : EXTRACT FROM VIEW
 };
 
+#define MAX_MODEL_WORLDS 4
+
 layout( std140, set = 2, binding = 0 ) uniform PerObjectCB {
-   	mat4 g_world;
+   	mat4 g_world[MAX_MODEL_WORLDS];
 };
 
-layout( std140, set = 5, binding = 0 ) uniform PerMaterialCB {
+layout( std140, set = 3, binding = 0 ) uniform PerMaterialCB {
 	vec3 g_ka;
 	vec3 g_kd;
 	vec3 g_ks;
 	float g_shininess;
 };
 
-layout( std140, set = 6, binding = 0 ) uniform PerFboCB {
+layout( std140, set = 4, binding = 0 ) uniform PerFboCB {
    	vec4 g_FboDimensions[16]; // x : Width, y : Height, z : 1 / Width, w : 1 / Height
 };
 
@@ -37,7 +39,12 @@ struct DirLight {
     vec3 color;
 };
 
-layout( std140, set = 7, binding = 0 ) uniform LightsCB {
+layout( std140, set = 5, binding = 0 ) uniform LightsCB {
    	DirLight g_dirLights[MAX_SHADER_LIGHTS];
    	int g_numDirLights;
 };
+
+layout( std140, set = 6, binding = 0 ) uniform AppConfigCB {
+   	vec3 g_globalColor;
+};
+

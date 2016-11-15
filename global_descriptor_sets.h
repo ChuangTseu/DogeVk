@@ -25,8 +25,10 @@ struct PerViewPointCB {
 	CB_PAD_FLOAT(1);
 };
 
+#define MAX_MODEL_WORLDS 4
+
 struct PerObjectCB {
-	glm::mat4 g_world;
+	glm::mat4 g_world[MAX_MODEL_WORLDS];
 };
 
 struct PerMaterialCB {
@@ -59,6 +61,8 @@ struct LightsCB {
 };
 
 struct AppConfigCB {
+	glm::vec3 g_globalColor;
+	CB_PAD_FLOAT(1);
 };
 
 #include "doge_vulkan.h"
@@ -101,28 +105,27 @@ public:
 		PerFrameCB, 
 		PerViewPointCB, 
 		PerObjectCB, 
-		PerMaterialCB, 
-		LightsCB
+		PerMaterialCB,
+		PerFboCB,
+		LightsCB,
+		AppConfigCB
 	> UsedCStructs;
 
-	enum ECBuffers {
-		kPerFrameCB,
-		kPerViewPointCB,
-		kPerObjectCB,
-		kPerMaterialCB,
-		kLightsCB
-	};
+	//enum ECBuffers {
+	//	kPerFrameCB,
+	//	kPerViewPointCB,
+	//	kPerObjectCB,
+	//	kPerMaterialCB,
+	//	kPerFboCB,
+	//	kLightsCB,
+	//	kAppConfigCB
+	//};
 
 	static UsedCStructs usedCStructs;
 
 	template <class CB>
 	static CB& GetMutableCBuffer() {
 		return std::get<CB>(usedCStructs);
-	}
-
-	template <ECBuffers Index>
-	static typename std::tuple_element<Index, UsedCStructs>::type& GetMutableCBuffer() {
-		return std::get<Index>(usedCStructs);
 	}
 
 	template <class CB>
@@ -135,13 +138,18 @@ public:
 			&std::get<idx>(usedCStructs));
 	}
 
-	template <ECBuffers Index>
-	static void CommitCBuffer() {
-		uniformBuffers[Index].UploadData(
-			VkDeviceSize{ 0 }, 
-			VkDeviceSize{ USED_CSTRUCT_SIZES[Index] },
-			&std::get<Index>(usedCStructs));
-	}
+	//template <ECBuffers Index>
+	//static typename std::tuple_element<Index, UsedCStructs>::type& GetMutableCBuffer() {
+	//	return std::get<Index>(usedCStructs);
+	//}
+
+	//template <ECBuffers Index>
+	//static void CommitCBuffer() {
+	//	uniformBuffers[Index].UploadData(
+	//		VkDeviceSize{ 0 }, 
+	//		VkDeviceSize{ USED_CSTRUCT_SIZES[Index] },
+	//		&std::get<Index>(usedCStructs));
+	//}
 
 	static constexpr u32 CB_COUNT = (u32)std::tuple_size<UsedCStructs>::value;
 	static constexpr std::array<size_t, CB_COUNT> USED_CSTRUCT_SIZES = arrTupleSizes<UsedCStructs>();

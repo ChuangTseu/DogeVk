@@ -7,7 +7,9 @@
 #include <vector>
 
 #include <glm/vec3.hpp>
+#include <glm/mat4x4.hpp>
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 
 struct DirLight {
 	glm::vec3 m_color;
@@ -22,6 +24,7 @@ struct Vertex {
 };
 
 #include "dedicated_buffer.h"
+#include "global_descriptor_sets.h"
 
 struct Scene {
 	void PrepareScene() {
@@ -72,7 +75,6 @@ struct Scene {
 		const u32 cubeIndexCount = cubeInstanceCount * 3u;
 
 		modelPrimitiveTopology = cubePrimitiveTopology;
-		modelInstanceCount = cubeInstanceCount;
 
 		modelVertexCount = cubeVertexCount;
 		Vertex* modelVertices = &(cubeVertices[0]);
@@ -91,6 +93,20 @@ struct Scene {
 
 		vertexBuffer.UploadData(VkDeviceSize{ 0 }, vertexBufferSize, modelVertices);
 		indexBuffer.UploadData(VkDeviceSize{ 0 }, indexBufferSize, modelIndices);
+
+		modelInstanceCount = 3;
+	}
+
+	void UpdateScene(float time) {
+		const float timeFactor = 0.1f;
+
+		modelWorld = glm::translate(glm::mat4(1.f), glm::vec3(0.f, glm::sin(time*timeFactor), 0.f));
+		modelWorld2 = glm::translate(glm::mat4(1.f), glm::vec3(1.3f*glm::sin(time*timeFactor), 0.f, 1.3f*glm::cos(time*timeFactor)));
+
+		PerObjectCB& perObjectCB = GlobalDescriptorSets::GetMutableCBuffer<PerObjectCB>();
+		perObjectCB.g_world[0] = modelWorld;
+		perObjectCB.g_world[1] = modelWorld2;
+		GlobalDescriptorSets::CommitCBuffer<PerObjectCB>();
 	}
 
 	void Destroy() {
@@ -108,8 +124,23 @@ struct Scene {
 	u32 modelVertexCount;
 	VkDeviceSize sizeofVertex;
 
+	glm::mat4 modelWorld;
+	glm::mat4 modelWorld2;
+
 	// Contains light
 	std::vector<DirLight> dirLights;
+};
+
+struct Image {
+	VkImage image;
+	VkImageView view;
+	VkDeviceMemory memory;
+
+	void Destroy() {
+		vkFreeMemory(gDevice.VkHandle(), memory, nullptr);
+		vkDestroyImageView(gDevice.VkHandle(), view, nullptr);
+		vkDestroyImage(gDevice.VkHandle(), image, nullptr);
+	}
 };
 
 struct Forward {
@@ -126,13 +157,17 @@ private:
 	void SetupPipelineLayout();
 	void SetupGraphicsPipeline();
 	void SetupRenderTargets();
+	void SetupCmdBufferPool();
 	void SetupFrameRenderResources();
+
+	void TransitionInitiallyUndefinedImages();
+	void CookSpawChainCmdBuffers(const Scene& scene);
 
 	void CleanupSetupOnlyResources();
 
 public:
 
-	void SetupPipeline() {
+	void SetupPipeline(const Scene& scene) {
 		SetupShaderStages();
 		SetupVertexInput();
 		SetupInputAssembly();
@@ -145,10 +180,15 @@ public:
 		SetupPipelineLayout();
 		SetupGraphicsPipeline();
 		SetupRenderTargets();
+		SetupCmdBufferPool();
 		SetupFrameRenderResources();
+
+		TransitionInitiallyUndefinedImages();
+		CookSpawChainCmdBuffers(scene);
 
 		CleanupSetupOnlyResources();
 	}
+
 
 	VkShaderModule vertexModule;
 	VkShaderModule fragmentModule;
@@ -171,27 +211,26 @@ public:
 	VkPipelineColorBlendAttachmentState singleColorBlendState;
 	VkPipelineColorBlendStateCreateInfo colorblendStateCreateInfo;
 
-	VkRenderPass renderPass;
+	VkRenderPass mRenderPass;
 
-	VkPipelineLayout pipelineLayout;
+	VkPipelineLayout mPipelineLayout;
+	VkPipeline mPipeline;
 
-	VkPipeline pipeline;
+	VkCommandPool mCmdPool;
 
-	std::vector<bool> aIsFirstSwapImageUse;
-	bool isFirstDepthStencilImageUse;
+	std::vector<Image> mDepthImages;
+	std::vector<VkCommandBuffer> mDrawTriangleCmdBuffers;
+	std::vector<VkFramebuffer> mFramebuffers;
 
-	VkImage gDepthStencilImage;
-	VkDeviceMemory gDepthStencilImageMemory;
-	VkImageView gDepthStencilView;
+	//VkImage gDepthStencilImage;
+	//VkDeviceMemory gDepthStencilImageMemory;
+	//VkImageView gDepthStencilView;
 
 	VkSemaphore imageAcquiredSemaphore;
 	VkSemaphore renderingCompleteSemaphore;
 
-	VkFramebuffer framebuffer;
-	VkCommandPool cmdPool;
 
 	void SubmitFrameRender(const Scene & scene, VkQueue graphicQueue, VkQueue presentQueue);
-	void CleanupAfterFrame();
 
 	// Render geometry from viewpoint
 

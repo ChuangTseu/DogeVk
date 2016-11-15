@@ -150,16 +150,17 @@ set(COMMON_SOURCE_FILES)
 # _SOURCE can be more than one file (.vert + .frag)
 # _OUTPUT is the .spv file, resulting from the linkage
 #
-macro(_compile_GLSL _SOURCE _OUTPUT SOURCE_LIST)
+macro(_compile_GLSL _SOURCE _DEPENDENCIES _OUTPUT SOURCE_LIST)
   LIST(APPEND ${SOURCE_LIST} ${_SOURCE})
   Message(STATUS "${GLSLC} ${_SOURCE} -o ${_OUTPUT}")
-  Message(STATUS "${_OUTPUT} : ${_SOURCE}")
+  Message(STATUS "${_OUTPUT} : ${_SOURCE} (dependencies: ${_DEPENDENCIES})")
   if(GLSLC)
     add_custom_command(
       OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/${_OUTPUT}
       COMMAND echo ${GLSLC} ${_SOURCE} -o ${_OUTPUT}
       COMMAND ${GLSLC} ${_SOURCE} -o ${_OUTPUT}
       MAIN_DEPENDENCY ${_SOURCE}
+      DEPENDS ${_DEPENDENCIES}
       WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
       )
   else(GLSLC)
