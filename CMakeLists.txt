@@ -47,6 +47,7 @@ set(GlobalShaderDependencies "shaders/global_descriptor_sets.h")
 
 _compile_GLSL("shaders/simple.vert" ${GlobalShaderDependencies} "shaders/simple_vert.spv" GLSL_FILES)
 _compile_GLSL("shaders/simple.frag" ${GlobalShaderDependencies} "shaders/simple_frag.spv" GLSL_FILES)
+_compile_GLSL("shaders/shadow.vert" ${GlobalShaderDependencies} "shaders/shadow_vert.spv" GLSL_FILES)
 
 Message("GLSL_FILES: ${GLSL_FILES}")
 

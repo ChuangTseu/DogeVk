@@ -1,8 +1,6 @@
 #include "global_descriptor_sets.h"
 
 GlobalDescriptorSets::UsedCStructs GlobalDescriptorSets::usedCStructs;
-VkDescriptorSetLayoutBinding GlobalDescriptorSets::descripterSetLayoutBindings[GlobalDescriptorSets::CB_COUNT];
-VkDescriptorSetLayoutCreateInfo GlobalDescriptorSets::descriptorSetLayoutCreateInfos[GlobalDescriptorSets::CB_COUNT];
 VkDescriptorSetLayout GlobalDescriptorSets::descriptorSetLayouts[GlobalDescriptorSets::CB_COUNT];
 VkDescriptorPool GlobalDescriptorSets::descriptorPool;
 VkDescriptorSet GlobalDescriptorSets::descriptorSets[GlobalDescriptorSets::CB_COUNT];
@@ -10,24 +8,19 @@ DedicatedBuffer GlobalDescriptorSets::uniformBuffers[GlobalDescriptorSets::CB_CO
 
 void GlobalDescriptorSets::Initialize()
 {
-	// TODO: Fold the loops and keep only a single working VkDescriptorSetLayoutBinding and VkDescriptorSetLayoutCreateInfo 
-	// for the creation of the many VkDescriptorSetLayout
-	for (u32 i = 0; i < CB_COUNT; ++i) {
-		descripterSetLayoutBindings[i].binding = 0u;
-		descripterSetLayoutBindings[i].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-		descripterSetLayoutBindings[i].descriptorCount = 1u;
-		descripterSetLayoutBindings[i].stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS;
-		descripterSetLayoutBindings[i].pImmutableSamplers = nullptr;
-	}
+	VkDescriptorSetLayoutBinding descripterSetLayoutBinding;
+	descripterSetLayoutBinding.binding = 0u;
+	descripterSetLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	descripterSetLayoutBinding.descriptorCount = 1u;
+	descripterSetLayoutBinding.stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS;
+	descripterSetLayoutBinding.pImmutableSamplers = nullptr;
+
+	auto descriptorSetLayoutCreateInfo = vkstruct<VkDescriptorSetLayoutCreateInfo>();
+	descriptorSetLayoutCreateInfo.bindingCount = 1u;
+	descriptorSetLayoutCreateInfo.pBindings = &descripterSetLayoutBinding;
 
 	for (u32 i = 0; i < CB_COUNT; ++i) {
-		descriptorSetLayoutCreateInfos[i] = vkstruct<VkDescriptorSetLayoutCreateInfo>();
-		descriptorSetLayoutCreateInfos[i].bindingCount = 1u;
-		descriptorSetLayoutCreateInfos[i].pBindings = &descripterSetLayoutBindings[i];
-	}
-
-	for (u32 i = 0; i < CB_COUNT; ++i) {
-		gVkLastRes = vkCreateDescriptorSetLayout(gDevice.VkHandle(), &descriptorSetLayoutCreateInfos[i], nullptr, &descriptorSetLayouts[i]);
+		gVkLastRes = vkCreateDescriptorSetLayout(gDevice.VkHandle(), &descriptorSetLayoutCreateInfo, nullptr, &descriptorSetLayouts[i]);
 		VKFN_LAST_RES_SUCCESS_OR_QUIT(vkCreateDescriptorSetLayout);
 	}
 

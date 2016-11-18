@@ -20,5 +20,5 @@ constexpr bool hasBisSet(u32 bitsetVal, u32 bitIndex) {
 // Wrapper for calling get std container .size() as a forced uint32_t for Vulkan functions
 template <class CONT>
 constexpr u32 len32(const CONT& cont) {
-	return static_cast<u32>(cont.size());
+	return static_cast<u32>(std::size(cont));
 }

@@ -30,6 +30,7 @@ extern "C" { _declspec(dllexport) DWORD NvOptimusEnablement = 0x00000001; }; // 
 
 #include <glm/mat4x4.hpp>
 #include <glm/gtc/type_ptr.hpp>
+#define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/trigonometric.hpp>
 
@@ -50,9 +51,10 @@ extern "C" { _declspec(dllexport) DWORD NvOptimusEnablement = 0x00000001; }; // 
 #include "memory.h"
 #include "dedicated_buffer.h"
 #include "debug_report.h"
-
 #include "global_descriptor_sets.h"
+
 #include "forward.h"
+#include "shadow.h"
 
 float fakeTime = 0.f;
 
@@ -237,12 +239,15 @@ int main()
 
 	GlobalDescriptorSets::Initialize();
 
-	Forward forward;
-	forward.SetupPipeline(scene);	
+	gShadow.SetupPipeline(scene);
+	gForward.SetupPipeline(scene);
 
 	// Init camera
 	gCamera.SetPositionProperties(glm::vec3(0.f, 0.f, -4.f), glm::vec3(0.f, 0.f, 1.f), glm::vec3(0.f, 1.f, 0.f));
 	gCamera.SetProjectionProperties(45.f, (float)WINDOW_WIDTH / (float)WINDOW_HEIGHT, 0.1f, 100.f);
+	gCamera.UpdateLookAt();
+
+	glm::mat4 initialCameraViewProj = gCamera.GetViewProjection();
 
 	//// SETUP GLFW events handling
 	glfwSetKeyCallback(gWindow.GLFWHandle(), key_callback);
@@ -260,7 +265,8 @@ int main()
 	/* Loop until the user closes the window */
 	while (!glfwWindowShouldClose(gWindow.GLFWHandle()) && !gEscapePressed)
 	{
-		forward.SubmitFrameRender(scene, gVkGraphicsQueue, gVkPresentQueue);
+		gShadow.SubmitFrameRender(gVkGraphicsQueue);
+		gForward.SubmitFrameRender(gVkGraphicsQueue, gVkPresentQueue);
 
 		/* End of Rendering */
 
@@ -297,9 +303,10 @@ int main()
 		GlobalDescriptorSets::CommitCBuffer<PerViewPointCB>();
 
 		LightsCB& lightsCB = GlobalDescriptorSets::GetMutableCBuffer<LightsCB>();
-		lightsCB.dirLights[0].m_color = glm::vec3(1.f, 1.f, 1.f);
-		lightsCB.dirLights[0].m_direction = glm::vec3(glm::sin(fakeTime*timeFactor), 0.f, glm::cos(fakeTime*timeFactor));
-		lightsCB.numDirLights = 1;
+		lightsCB.g_dirLights[0].m_color = glm::vec3(1.f, 1.f, 1.f);
+		lightsCB.g_dirLights[0].m_direction = glm::vec3(glm::sin(fakeTime*timeFactor), 0.f, glm::cos(fakeTime*timeFactor));
+		lightsCB.g_lightViewProj[0] = initialCameraViewProj;
+		lightsCB.g_numDirLights = 1;
 		GlobalDescriptorSets::CommitCBuffer<LightsCB>();
 
 		// Test per frame fragUniformBuffer modification
@@ -325,7 +332,7 @@ int main()
 	// Destroy children here
 
 	scene.Destroy();
-	forward.Destroy();
+	gForward.Destroy();
 	gSwapChain.Destroy();
 
 	vkDestroySwapchainKHR(gDevice.VkHandle(), gSwapChain.VkHandle(), nullptr);

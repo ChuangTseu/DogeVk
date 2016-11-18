@@ -28,23 +28,20 @@ layout( std140, set = 3, binding = 0 ) uniform PerMaterialCB {
 	float g_shininess;
 };
 
-layout( std140, set = 4, binding = 0 ) uniform PerFboCB {
-   	vec4 g_FboDimensions[16]; // x : Width, y : Height, z : 1 / Width, w : 1 / Height
-};
-
-#define MAX_SHADER_LIGHTS 16
+#define MAX_SHADER_LIGHTS 8
 
 struct DirLight {
     vec3 direction;
     vec3 color;
 };
 
-layout( std140, set = 5, binding = 0 ) uniform LightsCB {
+layout( std140, set = 4, binding = 0 ) uniform LightsCB {
    	DirLight g_dirLights[MAX_SHADER_LIGHTS];
+   	mat4 g_lightViewProj[MAX_SHADER_LIGHTS];
    	int g_numDirLights;
 };
 
-layout( std140, set = 6, binding = 0 ) uniform AppConfigCB {
+layout( std140, set = 5, binding = 0 ) uniform AppConfigCB {
    	vec3 g_globalColor;
 };
 

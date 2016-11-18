@@ -505,3 +505,6 @@ VkRenderPass create_VkRenderPass(const VkRenderPassCreateInfo* renderPassCreateI
 VkShaderModule create_VkShaderModule_fromFile(const char* filepath);
 
 VkPipelineColorBlendAttachmentState create_VkPipelineColorBlendAttachmentState_disabledBlend(VkColorComponentFlags colorWriteMask);
+
+void CreateDepthImageAndView(VkImage* image, VkImageView* view, VkDeviceMemory* memory, u32 w, u32 h, u32 queueFamilyIndex, bool isSampled);
+void cmdTransitionSimpleImageFromInitialState(VkCommandBuffer cmdBuffer, VkImage image, VkImageAspectFlagBits aspectMask, VkImageLayout initialLayout, VkImageLayout newLayout, VkAccessFlags firstMemoryAccessMask, VkPipelineStageFlags firstDependentStage);

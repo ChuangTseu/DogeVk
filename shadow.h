@@ -15,11 +15,9 @@
 #include "dedicated_buffer.h"
 #include "global_descriptor_sets.h"
 #include "image.h"
-#include "vertex.h"
 #include "scene.h"
-#include "light.h"
 
-struct Forward {
+struct Shadow {
 private:
 	void SetupShaderStages();
 	void SetupVertexInput();
@@ -30,7 +28,6 @@ private:
 	void SetupDepthStencil();
 	void SetupColorBlend();
 	void SetupRenderPass();
-	void PrepareShadowMapsDescriptorSet();
 	void SetupPipelineLayout();
 	void SetupGraphicsPipeline();
 	void SetupRenderTargets();
@@ -38,7 +35,7 @@ private:
 	void SetupFrameRenderResources();
 
 	void TransitionInitiallyUndefinedImages();
-	void CookSpawChainCmdBuffers(const Scene& scene);
+	void CookCmdBuffer(const Scene& scene);
 
 	void CleanupSetupOnlyResources();
 
@@ -54,7 +51,6 @@ public:
 		SetupDepthStencil();
 		SetupColorBlend();
 		SetupRenderPass();
-		PrepareShadowMapsDescriptorSet();
 		SetupPipelineLayout();
 		SetupGraphicsPipeline();
 		SetupRenderTargets();
@@ -62,18 +58,16 @@ public:
 		SetupFrameRenderResources();
 
 		TransitionInitiallyUndefinedImages();
-		CookSpawChainCmdBuffers(scene);
+		CookCmdBuffer(scene);
 
 		CleanupSetupOnlyResources();
 	}
 
+	static const u32 SHADOWMAP_RES = 1024u;
 
 	VkShaderModule vertexModule;
-	VkShaderModule fragmentModule;
-	VkPipelineShaderStageCreateInfo shaderStagesCreateInfo[2];
+	VkPipelineShaderStageCreateInfo shaderStageCreateInfo;
 
-	VkVertexInputBindingDescription inputBindingDesc;
-	VkVertexInputAttributeDescription vertexInputAttribDescs[2];
 	VkPipelineVertexInputStateCreateInfo vertexInputStateCreateInfo;
 
 	VkPipelineInputAssemblyStateCreateInfo inputAssemblyStateCreateInfo;
@@ -86,7 +80,7 @@ public:
 	VkPipelineMultisampleStateCreateInfo multisampleStateCreateInfo;
 	VkPipelineDepthStencilStateCreateInfo depthstencilStateCreateInfo;
 
-	VkPipelineColorBlendAttachmentState singleColorBlendState;
+	VkPipelineColorBlendAttachmentState noColorBlendState;
 	VkPipelineColorBlendStateCreateInfo colorblendStateCreateInfo;
 
 	VkRenderPass mRenderPass;
@@ -96,27 +90,16 @@ public:
 
 	VkCommandPool mCmdPool;
 
-	std::vector<Image> mDepthImages;
-	std::vector<VkCommandBuffer> mDrawTriangleCmdBuffers;
-	std::vector<VkFramebuffer> mFramebuffers;
+	Image mDepthImage;
+	VkCommandBuffer mCmdBuffer;
+	VkFramebuffer mFramebuffer;
 
-	VkSemaphore imageAcquiredSemaphore;
-	VkSemaphore renderingCompleteSemaphore;
-
-	VkSampler shadowMapSampler;
-	VkDescriptorSetLayout shadowMapsDescriptorSetLayout;
-	VkDescriptorPool shadowMapsDescriptorPool;
-	VkDescriptorSet shadowMapsDescriptorSet;
+	VkSemaphore shadowMapCompleteSemaphore;
 
 
-
-	void SubmitFrameRender(VkQueue graphicQueue, VkQueue presentQueue);
-
-	// Render geometry from viewpoint
-
-	// In fragment shader, for each light, accumulate lighting
+	void SubmitFrameRender(VkQueue graphicQueue);
 
 	void Destroy();
 };
 
-extern Forward gForward;
+extern Shadow gShadow;

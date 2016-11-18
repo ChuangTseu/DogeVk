@@ -1,5 +1,9 @@
 #include "forward.h"
 
+#include <array>
+
+#include <glm/gtc/type_ptr.hpp>
+
 #include "vulkan_helpers.h"
 
 #include "config.h"
@@ -9,7 +13,7 @@
 #include "memory.h"
 #include "global_descriptor_sets.h"
 
-#include <glm/gtc/type_ptr.hpp>
+#include "shadow.h"
 
 Forward gForward;
 
@@ -185,6 +189,96 @@ void Forward::SetupRenderPass()
 	mRenderPass = create_VkRenderPass(&renderPassCreateInfo);
 }
 
+void Forward::PrepareShadowMapsDescriptorSet()
+{
+	VkSamplerCreateInfo shadowMapSamplerCreateInfo;
+	shadowMapSamplerCreateInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+	shadowMapSamplerCreateInfo.pNext = nullptr;
+	shadowMapSamplerCreateInfo.flags = 0; // reserved for future use
+	shadowMapSamplerCreateInfo.magFilter = VK_FILTER_NEAREST;
+	shadowMapSamplerCreateInfo.minFilter = VK_FILTER_NEAREST;
+	shadowMapSamplerCreateInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+	shadowMapSamplerCreateInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+	shadowMapSamplerCreateInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+	shadowMapSamplerCreateInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+	shadowMapSamplerCreateInfo.mipLodBias = 0.f;
+	shadowMapSamplerCreateInfo.anisotropyEnable = VK_FALSE;
+	shadowMapSamplerCreateInfo.maxAnisotropy = 0.f;
+	shadowMapSamplerCreateInfo.compareEnable = VK_TRUE;
+	shadowMapSamplerCreateInfo.compareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+	shadowMapSamplerCreateInfo.minLod = 0.f;
+	shadowMapSamplerCreateInfo.maxLod = 0.f;
+	shadowMapSamplerCreateInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK;
+	shadowMapSamplerCreateInfo.unnormalizedCoordinates = VK_FALSE;
+
+	gVkLastRes = vkCreateSampler(gDevice.VkHandle(), &shadowMapSamplerCreateInfo, nullptr, &shadowMapSampler);
+	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkCreateSampler);
+
+	std::array<VkSampler, MAX_SHADER_LIGHTS> immutableSamplers;
+	immutableSamplers.fill(shadowMapSampler);
+
+	VkDescriptorSetLayoutBinding descripterSetLayoutBinding;
+	descripterSetLayoutBinding.binding = 0u;
+	descripterSetLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	descripterSetLayoutBinding.descriptorCount = MAX_SHADER_LIGHTS;
+	descripterSetLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+	descripterSetLayoutBinding.pImmutableSamplers = immutableSamplers.data();
+
+	// TMP
+	//descripterSetLayoutBinding.descriptorCount = 1u;
+	//descripterSetLayoutBinding.pImmutableSamplers = &shadowMapSampler;
+
+	//descripterSetLayoutBinding.pImmutableSamplers = nullptr;
+	// TMP
+
+	auto descriptorSetLayoutCreateInfo = vkstruct<VkDescriptorSetLayoutCreateInfo>();
+	descriptorSetLayoutCreateInfo.bindingCount = 1u;
+	descriptorSetLayoutCreateInfo.pBindings = &descripterSetLayoutBinding;
+
+	gVkLastRes = vkCreateDescriptorSetLayout(gDevice.VkHandle(), &descriptorSetLayoutCreateInfo, nullptr, &shadowMapsDescriptorSetLayout);
+	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkCreateDescriptorSetLayout);
+
+	VkDescriptorPoolSize descriptorPoolSize;
+	descriptorPoolSize.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	descriptorPoolSize.descriptorCount = MAX_SHADER_LIGHTS;
+
+	// TMP
+	//descriptorPoolSize.descriptorCount = 1u;
+	// TMP
+
+	auto descriptorPoolCreateInfo = vkstruct<VkDescriptorPoolCreateInfo>();
+	descriptorPoolCreateInfo.flags = 0;
+	descriptorPoolCreateInfo.maxSets = 1u;
+	descriptorPoolCreateInfo.poolSizeCount = 1u;
+	descriptorPoolCreateInfo.pPoolSizes = &descriptorPoolSize;
+
+	gVkLastRes = vkCreateDescriptorPool(gDevice.VkHandle(), &descriptorPoolCreateInfo, nullptr, &shadowMapsDescriptorPool);
+	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkCreateDescriptorPool);
+
+	auto descriptorSetAllocateInfo = vkstruct<VkDescriptorSetAllocateInfo>();
+	descriptorSetAllocateInfo.descriptorPool = shadowMapsDescriptorPool;
+	descriptorSetAllocateInfo.descriptorSetCount = 1u;
+	descriptorSetAllocateInfo.pSetLayouts = &shadowMapsDescriptorSetLayout;
+
+	gVkLastRes = vkAllocateDescriptorSets(gDevice.VkHandle(), &descriptorSetAllocateInfo, &shadowMapsDescriptorSet);
+	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkAllocateDescriptorSets);
+
+	VkDescriptorImageInfo descriptorImageInfo;
+	descriptorImageInfo.sampler = VK_NULL_HANDLE; // Nothing ! Using immutable sampler
+	descriptorImageInfo.imageView = gShadow.mDepthImage.view;
+	descriptorImageInfo.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+
+	auto descriptorWrite = vkstruct<VkWriteDescriptorSet>();
+	descriptorWrite.dstSet = shadowMapsDescriptorSet;
+	descriptorWrite.dstBinding = 0u;
+	descriptorWrite.dstArrayElement = 0u;
+	descriptorWrite.descriptorCount = 1u;
+	descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	descriptorWrite.pImageInfo = &descriptorImageInfo;
+
+	vkUpdateDescriptorSets(gDevice.VkHandle(), 1u, &descriptorWrite, 0u, nullptr);
+}
+
 void Forward::SetupPipelineLayout()
 {
 	VkPushConstantRange vertexPushConstantRange;
@@ -192,9 +286,14 @@ void Forward::SetupPipelineLayout()
 	vertexPushConstantRange.offset = 0u;
 	vertexPushConstantRange.size = 64u; // mat4
 
+	// Put custom descriptor set layout after the GlobalDescriptorSets base
+	VkDescriptorSetLayout descriptorSetLayouts[GlobalDescriptorSets::CB_COUNT + 1];
+	std::copy_n(GlobalDescriptorSets::descriptorSetLayouts, GlobalDescriptorSets::CB_COUNT, descriptorSetLayouts);
+	descriptorSetLayouts[GlobalDescriptorSets::CB_COUNT] = shadowMapsDescriptorSetLayout;
+
 	auto pipelineLayoutCreateInfo = vkstruct<VkPipelineLayoutCreateInfo>();
-	pipelineLayoutCreateInfo.setLayoutCount = GlobalDescriptorSets::CB_COUNT;
-	pipelineLayoutCreateInfo.pSetLayouts = GlobalDescriptorSets::descriptorSetLayouts;
+	pipelineLayoutCreateInfo.setLayoutCount = len32(descriptorSetLayouts);
+	pipelineLayoutCreateInfo.pSetLayouts = descriptorSetLayouts;
 	pipelineLayoutCreateInfo.pushConstantRangeCount = 1u;
 	pipelineLayoutCreateInfo.pPushConstantRanges = &vertexPushConstantRange;
 
@@ -225,54 +324,12 @@ void Forward::SetupGraphicsPipeline()
 	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkCreateGraphicsPipelines);
 }
 
-void CreateDepthImageAndView(VkImage* image, VkImageView* view, VkDeviceMemory* memory, u32 w, u32 h, u32 queueFamilyIndex) {
-	auto depthImageCreateInfo = vkstruct<VkImageCreateInfo>();
-	depthImageCreateInfo.flags = 0;
-	depthImageCreateInfo.imageType = VK_IMAGE_TYPE_2D;
-	depthImageCreateInfo.format = VK_FORMAT_D32_SFLOAT;
-	depthImageCreateInfo.extent = { w, h, 1 };
-	depthImageCreateInfo.mipLevels = 1u;
-	depthImageCreateInfo.arrayLayers = 1u;
-	depthImageCreateInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-	depthImageCreateInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-	depthImageCreateInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-	depthImageCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-	depthImageCreateInfo.queueFamilyIndexCount = 1u;
-	depthImageCreateInfo.pQueueFamilyIndices = &queueFamilyIndex;
-	depthImageCreateInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-
-	gVkLastRes = vkCreateImage(gDevice.VkHandle(), &depthImageCreateInfo, nullptr, image);
-	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkCreateImage);
-
-	allocateNewImageMemory(image, memory, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-	gVkLastRes = vkBindImageMemory(gDevice.VkHandle(), *image, *memory, 0);
-	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkBindImageMemory);
-
-	VkImageSubresourceRange depthImageSubresourceRange;
-	depthImageSubresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-	depthImageSubresourceRange.baseMipLevel = 0;
-	depthImageSubresourceRange.levelCount = 1;
-	depthImageSubresourceRange.baseArrayLayer = 0;
-	depthImageSubresourceRange.layerCount = 1;
-
-	VkImageViewCreateInfo depthViewCreateInfo = vkstruct<VkImageViewCreateInfo>();
-	depthViewCreateInfo.image = *image;
-	depthViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-	depthViewCreateInfo.format = VK_FORMAT_D32_SFLOAT;
-	depthViewCreateInfo.components = identityComponentMapping;
-	depthViewCreateInfo.subresourceRange = depthImageSubresourceRange;
-
-	gVkLastRes = vkCreateImageView(gDevice.VkHandle(), &depthViewCreateInfo, nullptr, view);
-	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkCreateImageView);
-}
-
 void Forward::SetupRenderTargets()
 {
 	mDepthImages.resize(gSwapChain.ImageCount());
 
 	for (u32 i = 0; i < gSwapChain.ImageCount(); ++i) {
-		CreateDepthImageAndView(&mDepthImages[i].image, &mDepthImages[i].view, &mDepthImages[i].memory, WINDOW_WIDTH, WINDOW_HEIGHT, 0u);
+		CreateDepthImageAndView(&mDepthImages[i].image, &mDepthImages[i].view, &mDepthImages[i].memory, WINDOW_WIDTH, WINDOW_HEIGHT, 0u, false);
 	}
 }
 
@@ -281,7 +338,6 @@ void Forward::SetupFrameRenderResources()
 	imageAcquiredSemaphore = create_VkSemaphore();
 	renderingCompleteSemaphore = create_VkSemaphore();
 }
-
 
 void Forward::TransitionInitiallyUndefinedImages()
 {
@@ -296,33 +352,6 @@ void Forward::CleanupSetupOnlyResources()
 	vkDestroyShaderModule(gDevice.VkHandle(), vertexModule, nullptr);
 	vkDestroyShaderModule(gDevice.VkHandle(), fragmentModule, nullptr);
 }
-
-void cmdTransitionSimpleImageFromInitialState(
-	VkCommandBuffer cmdBuffer, VkImage image,
-	VkImageAspectFlagBits aspectMask, VkImageLayout initialLayout, VkImageLayout newLayout,
-	VkAccessFlags firstMemoryAccessMask, VkPipelineStageFlags firstDependentStage) {
-
-	assert(initialLayout == VK_IMAGE_LAYOUT_UNDEFINED || initialLayout == VK_IMAGE_LAYOUT_PREINITIALIZED);
-
-	VkImageSubresourceRange imageSubresourceRange;
-	imageSubresourceRange.aspectMask = aspectMask;
-	imageSubresourceRange.baseMipLevel = 0u;
-	imageSubresourceRange.levelCount = 1u;
-	imageSubresourceRange.baseArrayLayer = 0u;
-	imageSubresourceRange.layerCount = 1u;
-
-	auto imageBarrier = vkstruct<VkImageMemoryBarrier>();
-	imageBarrier.srcAccessMask = 0;
-	imageBarrier.dstAccessMask = firstMemoryAccessMask;
-	imageBarrier.oldLayout = initialLayout;
-	imageBarrier.newLayout = newLayout;
-	imageBarrier.image = image;
-	imageBarrier.subresourceRange = imageSubresourceRange;
-
-	vkCmdPipelineBarrier(cmdBuffer, firstDependentStage, firstDependentStage,
-		0, 0u, nullptr, 0u, nullptr, 1u, &imageBarrier);
-};
-
 
 void Forward::SetupCmdBufferPool()
 {
@@ -412,21 +441,15 @@ void Forward::CookSpawChainCmdBuffers(const Scene& scene)
 
 		vkCmdBindPipeline(mDrawTriangleCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, mPipeline);
 
+		// Put custom descriptor set after the GlobalDescriptorSets base
+		VkDescriptorSet descriptorSets[GlobalDescriptorSets::CB_COUNT + 1];
+		std::copy_n(GlobalDescriptorSets::descriptorSets, GlobalDescriptorSets::CB_COUNT, descriptorSets);
+		descriptorSets[GlobalDescriptorSets::CB_COUNT] = shadowMapsDescriptorSet;
+
 		vkCmdBindDescriptorSets(mDrawTriangleCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, mPipelineLayout,
-			0u, GlobalDescriptorSets::CB_COUNT, GlobalDescriptorSets::descriptorSets, 0u, nullptr);
+			0u, len32(descriptorSets), descriptorSets, 0u, nullptr);
 
-		vkCmdBindIndexBuffer(mDrawTriangleCmdBuffers[i], scene.indexBuffer.m_buffer, 0u, VK_INDEX_TYPE_UINT32);
-
-		VkDeviceSize vertexBufferOffsetArray[] = { 0 };
-		vkCmdBindVertexBuffers(mDrawTriangleCmdBuffers[i], 0u, 1u, &(scene.vertexBuffer.m_buffer), vertexBufferOffsetArray);
-
-		vkCmdDrawIndexed(mDrawTriangleCmdBuffers[i], scene.modelIndexCount, scene.modelInstanceCount, 0u, 0u, 0u);
-		// OR, ONLY IF REBUILDING THE BUFFER EACH FRAME, MIGHT UPLOAD VIA PUSH CONSTANT
-		//for (u32 modelIdx = 0; modelIdx < scene.modelInstanceCount; ++modelIdx) {
-		//	vkCmdPushConstants(mDrawTriangleCmdBuffers[i], mPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0u, 64u,
-		//		glm::value_ptr(GlobalDescriptorSets::GetMutableCBuffer<PerObjectCB>().g_world[modelIdx]));
-		//	vkCmdDrawIndexed(mDrawTriangleCmdBuffers[i], scene.modelIndexCount, 1, 0u, 0u, 0u);
-		//}
+		scene.BindDrawingToCmdBuffer(mDrawTriangleCmdBuffers[i]);
 
 		vkCmdEndRenderPass(mDrawTriangleCmdBuffers[i]);
 
@@ -457,32 +480,19 @@ void Forward::CookSpawChainCmdBuffers(const Scene& scene)
 	}
 }
 
-void Forward::SubmitFrameRender(const Scene& scene, VkQueue graphicQueue, VkQueue presentQueue)
+void Forward::SubmitFrameRender(VkQueue graphicQueue, VkQueue presentQueue)
 {
-	/* Render here */
 	u32 currentSwapImageIndex = UINT32_MAX;
 	gVkLastRes = vkAcquireNextImageKHR(gDevice.VkHandle(), gSwapChain.VkHandle(), UINT64_MAX, imageAcquiredSemaphore, VK_NULL_HANDLE, &currentSwapImageIndex);
 	VKFN_LAST_RES_SUCCESS_OR_QUIT(vkAcquireNextImageKHR);
 
-	//////////////////////////////////////////////////////////////////	
-
-	
-
-	//if (isFirstDepthStencilImageUse) {
-	//	cmdTransitionSimpleImageFromInitialState(drawTriangleCmdBuffer, gDepthStencilImage, VK_IMAGE_ASPECT_DEPTH_BIT,
-	//		VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-	//		VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT);
-	//}
-
-
-	//////////////////////////////////////////////////////////////////
-
-	VkPipelineStageFlags waitSwapchainAcquiredAtStage[1u] = { VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT };
+	VkSemaphore waitSemaphores[] = { imageAcquiredSemaphore, gShadow.shadowMapCompleteSemaphore };
+	VkPipelineStageFlags waitForStages[] = { VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT };
 
 	auto submitInfo = vkstruct<VkSubmitInfo>();
-	submitInfo.waitSemaphoreCount = 1u;
-	submitInfo.pWaitSemaphores = &imageAcquiredSemaphore;
-	submitInfo.pWaitDstStageMask = waitSwapchainAcquiredAtStage;
+	submitInfo.waitSemaphoreCount = 2u;
+	submitInfo.pWaitSemaphores = waitSemaphores;
+	submitInfo.pWaitDstStageMask = waitForStages;
 	submitInfo.commandBufferCount = 1u;
 	submitInfo.pCommandBuffers = &mDrawTriangleCmdBuffers[currentSwapImageIndex];
 	submitInfo.signalSemaphoreCount = 1u;

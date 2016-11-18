@@ -40,12 +40,6 @@ struct PerMaterialCB {
 	float shininess;
 };
 
-struct PerFboCB {
-	glm::vec4 FboDimensions[16];
-};
-
-#define MAX_SHADER_LIGHTS 16
-
 struct DirLightCBStruct
 {
 	glm::vec3 m_direction;
@@ -54,9 +48,12 @@ struct DirLightCBStruct
 	CB_PAD_FLOAT(1);
 };
 
+#define MAX_SHADER_LIGHTS 8
+
 struct LightsCB {
-	DirLightCBStruct dirLights[16];
-	int numDirLights;
+	DirLightCBStruct g_dirLights[MAX_SHADER_LIGHTS];
+	glm::mat4 g_lightViewProj[MAX_SHADER_LIGHTS];
+	int g_numDirLights;
 	CB_PAD_FLOAT(3);
 };
 
@@ -106,20 +103,9 @@ public:
 		PerViewPointCB, 
 		PerObjectCB, 
 		PerMaterialCB,
-		PerFboCB,
 		LightsCB,
 		AppConfigCB
 	> UsedCStructs;
-
-	//enum ECBuffers {
-	//	kPerFrameCB,
-	//	kPerViewPointCB,
-	//	kPerObjectCB,
-	//	kPerMaterialCB,
-	//	kPerFboCB,
-	//	kLightsCB,
-	//	kAppConfigCB
-	//};
 
 	static UsedCStructs usedCStructs;
 
@@ -154,8 +140,6 @@ public:
 	static constexpr u32 CB_COUNT = (u32)std::tuple_size<UsedCStructs>::value;
 	static constexpr std::array<size_t, CB_COUNT> USED_CSTRUCT_SIZES = arrTupleSizes<UsedCStructs>();
 
-	static VkDescriptorSetLayoutBinding descripterSetLayoutBindings[CB_COUNT];
-	static VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfos[CB_COUNT];
 	static VkDescriptorSetLayout descriptorSetLayouts[CB_COUNT];
 
 	static VkDescriptorPool descriptorPool;
@@ -165,41 +149,4 @@ public:
 	static DedicatedBuffer uniformBuffers[CB_COUNT];	
 
 	static void Initialize();
-
-public:
-	/*static PerFrameCB m_perFrameCb;
-	static GLuint m_perFrameCbId;
-	static PerViewPointCB m_perViewPointCb;
-	static GLuint m_perViewPointId;
-	static PerObjectCB m_perObjectCb;
-	static GLuint m_perObjectCbId;
-	static PerLightCB m_perLightCb;
-	static GLuint m_perLightCbId;
-	static PerMaterialCB m_perMaterialCb;
-	static GLuint m_perMaterialCbId;
-	static PerFboCB m_perFboCb;
-	static GLuint m_perFboCbId;
-	static LightsCB m_lightsCb;
-	static GLuint m_lightsCbId;
-	static UIConfigCB m_UIConfigCb;
-	static GLuint m_UIConfigCbId;
-
-public:
-	static void CommitPerFrameCB();
-	static void CommitPerViewPointCB();
-	static void CommitPerObjectCB();
-	static void CommitPerLightCB();
-	static void CommitPerMaterialCB();
-	static void CommitPerFboCB();
-	static void CommitLightsCB();
-	static void CommitUIConfigCB();
-
-	static PerFrameCB& GetMutablePerFrameCB() { return m_perFrameCb; }
-	static PerViewPointCB& GetMutablePerViewPointCB() { return m_perViewPointCb; }
-	static PerObjectCB& GetMutablePerObjectCB() { return m_perObjectCb; }
-	static PerLightCB& GetMutablePerLightCB() { return m_perLightCb; }
-	static PerMaterialCB& GetMutablePerMaterialCB() { return m_perMaterialCb; }
-	static PerFboCB& GetMutablePerFboCB() { return m_perFboCb; }
-	static LightsCB& GetMutableLightsCB() { return m_lightsCb; }
-	static UIConfigCB& GetMutableUIConfigCB() { return m_UIConfigCb; }*/
 };
