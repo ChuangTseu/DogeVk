@@ -12,7 +12,6 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
-#include "dedicated_buffer.h"
 #include "global_descriptor_sets.h"
 #include "image.h"
 #include "scene.h"

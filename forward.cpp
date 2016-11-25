@@ -9,7 +9,6 @@
 #include "config.h"
 
 #include "swapchain.h"
-#include "dedicated_buffer.h"
 #include "memory.h"
 #include "global_descriptor_sets.h"
 
@@ -38,30 +37,7 @@ void Forward::SetupShaderStages()
 
 void Forward::SetupVertexInput()
 {
-	inputBindingDesc.binding = 0u;
-	inputBindingDesc.stride = sizeof(Vertex); // Attributes are interleaved for now
-	inputBindingDesc.inputRate = VK_VERTEX_INPUT_RATE_VERTEX; // TODO check the real meaning of this
-
-	VkVertexInputAttributeDescription positionInputAttribDesc;
-	positionInputAttribDesc.location = 0u;
-	positionInputAttribDesc.binding = 0u;
-	positionInputAttribDesc.format = VK_FORMAT_R32G32B32_SFLOAT;
-	positionInputAttribDesc.offset = 0u;
-
-	VkVertexInputAttributeDescription normalInputAttribDesc;
-	normalInputAttribDesc.location = 1u;
-	normalInputAttribDesc.binding = 0u;
-	normalInputAttribDesc.format = VK_FORMAT_R32G32B32_SFLOAT;
-	normalInputAttribDesc.offset = 12u;
-
-	vertexInputAttribDescs[0] = positionInputAttribDesc; 
-	vertexInputAttribDescs[1] = normalInputAttribDesc;
-
-	vertexInputStateCreateInfo = vkstruct<VkPipelineVertexInputStateCreateInfo>();
-	vertexInputStateCreateInfo.vertexBindingDescriptionCount = 1u;
-	vertexInputStateCreateInfo.pVertexBindingDescriptions = &inputBindingDesc;
-	vertexInputStateCreateInfo.vertexAttributeDescriptionCount = 2u;
-	vertexInputStateCreateInfo.pVertexAttributeDescriptions = vertexInputAttribDescs;
+	vertexInputStateCreateInfo = Vertex::GetPipelineVertexInputStateCreateInfo();
 }
 
 void Forward::SetupInputAssembly()
@@ -436,6 +412,26 @@ void Forward::CookSpawChainCmdBuffers(const Scene& scene)
 
 		vkCmdPipelineBarrier(mDrawTriangleCmdBuffers[i], VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
 			0, 0u, nullptr, 0u, nullptr, 1u, &acquireImageBarrier);
+
+		// SHADOW MAP COMPLETE BARRIER
+		VkImageSubresourceRange shadowmapImageSubresourceRange;
+		shadowmapImageSubresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+		shadowmapImageSubresourceRange.baseMipLevel = 0u;
+		shadowmapImageSubresourceRange.levelCount = 1u;
+		shadowmapImageSubresourceRange.baseArrayLayer = 0u;
+		shadowmapImageSubresourceRange.layerCount = 1u;
+
+		auto shadowmapImageBarrier = vkstruct<VkImageMemoryBarrier>();
+		shadowmapImageBarrier.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+		shadowmapImageBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+		shadowmapImageBarrier.oldLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+		shadowmapImageBarrier.newLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL; // VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		shadowmapImageBarrier.image = gShadow.mDepthImage.image;
+		shadowmapImageBarrier.subresourceRange = shadowmapImageSubresourceRange;
+
+		vkCmdPipelineBarrier(mDrawTriangleCmdBuffers[i], VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+			0, 0u, nullptr, 0u, nullptr, 1u, &shadowmapImageBarrier);
+		//gShadow.mDepthImage
 
 		vkCmdBeginRenderPass(mDrawTriangleCmdBuffers[i], &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
 

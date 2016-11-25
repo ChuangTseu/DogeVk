@@ -2,9 +2,13 @@
 
 out layout(location = 0) vec4 fragColor;
 
+in flat int instIdx;
+
 in vec3 worldPos;
 in vec3 worldNormal;
-in flat int instIdx;
+in vec2 worldTexcoord;
+in vec3 worldTangent;
+
 
 // TODO : Use specialization constants for things like MAX_LIGHT_COUNT, MAX_VIEWPOINT_COUNT, ...
 
@@ -13,7 +17,7 @@ in flat int instIdx;
 float shininess = 10.f;
 
 vec3 blinn_phong_calc_internal(vec3 lightDir, vec3 lightColor, vec3 normal) {
-    float Id = clamp(dot(normal, lightDir), 0, 1);
+    float Id = max(dot(lightDir, normal), 0);
 
     vec3 viewDir = normalize(g_eyePosition - worldPos);
     vec3 halfV = normalize(lightDir + viewDir);

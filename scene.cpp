@@ -11,14 +11,14 @@ void Scene::PrepareScene()
 {
 	// VERTEX & INDEX BUFFER SETUP
 	Vertex cubeVertices[] = {
-		{ { -1.0f, -1.0f, 1.0f },{} },
-		{ { 1.0f, -1.0f, 1.0f },{} },
-		{ { 1.0f, 1.0f, 1.0f },{} },
-		{ { -1.0f, 1.0f, 1.0f },{} },
-		{ { -1.0f, -1.0f, -1.0f },{} },
-		{ { 1.0f, -1.0f, -1.0f },{} },
-		{ { 1.0f, 1.0f, -1.0f },{} },
-		{ { -1.0f, 1.0f, -1.0f },{} }
+		{ { -1.0f, -1.0f, 1.0f },{},{},{} },
+		{ { 1.0f, -1.0f, 1.0f },{},{},{} },
+		{ { 1.0f, 1.0f, 1.0f },{},{},{} },
+		{ { -1.0f, 1.0f, 1.0f },{},{},{} },
+		{ { -1.0f, -1.0f, -1.0f },{},{},{} },
+		{ { 1.0f, -1.0f, -1.0f },{},{},{} },
+		{ { 1.0f, 1.0f, -1.0f },{},{},{} },
+		{ { -1.0f, 1.0f, -1.0f },{},{},{} }
 	};
 
 	for (Vertex& v : cubeVertices) {
@@ -52,8 +52,8 @@ void Scene::PrepareScene()
 		6, 7, 3,
 	};
 	const VkPrimitiveTopology cubePrimitiveTopology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-	const u32 cubeInstanceCount = 12u;
-	const u32 cubeIndexCount = cubeInstanceCount * 3u;
+	const u32 cubeFaceCount = 12u;
+	const u32 cubeIndexCount = cubeFaceCount * 3u;
 
 	modelPrimitiveTopology = cubePrimitiveTopology;
 
@@ -68,14 +68,21 @@ void Scene::PrepareScene()
 	const VkDeviceSize vertexBufferSize = modelVertexCount * sizeofVertex;
 	const VkDeviceSize indexBufferSize = modelIndexCount * sizeof(u32);
 
-	// BUG BUG BUG ? Don't know why, maybe I did something wrong, but the last vertex is zeroed out if not adding at least 4 to the buffer creation size
-	vertexBuffer.Create(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, vertexBufferSize + 4, DedicatedBuffer::eViaHostAccess);
-	indexBuffer.Create(VK_BUFFER_USAGE_INDEX_BUFFER_BIT, indexBufferSize, DedicatedBuffer::eViaHostAccess);
+	vertexBufferHandle = gDeviceBufferAllocator.GetNewBufferHandle(EDeviceBufferType::kVertex, vertexBufferSize, 0u);
+	indexBufferHandle = gDeviceBufferAllocator.GetNewBufferHandle(EDeviceBufferType::kIndex, indexBufferSize, 0u);
 
-	vertexBuffer.UploadData(VkDeviceSize{ 0 }, vertexBufferSize, modelVertices);
-	indexBuffer.UploadData(VkDeviceSize{ 0 }, indexBufferSize, modelIndices);
+	// BUG BUG BUG ? Don't know why, maybe I did something wrong, but the last vertex is zeroed out if not adding at least 4 to the buffer creation size
+	// Might be 'fixed'
+
+	gDeviceBufferAllocator.UploadData(vertexBufferHandle, VkDeviceSize{ 0 }, vertexBufferSize, modelVertices);
+	gDeviceBufferAllocator.UploadData(indexBufferHandle, VkDeviceSize{ 0 }, indexBufferSize, modelIndices);
 
 	modelInstanceCount = 4;
+
+	//cubenorm.loadFromFile(MODELS_FOLDER_PATH "cubenorm.obj");
+	cubenorm.loadFromFile(MODELS_FOLDER_PATH "Internet/cube/cube.obj");
+	//cubenorm.loadFromFile(MODELS_FOLDER_PATH "Internet/teapot/teapot.obj");
+	//cubenorm.loadFromFile(MODELS_FOLDER_PATH "Internet/buddha/buddha.obj");
 }
 
 void Scene::UpdateScene(float time)
@@ -97,10 +104,15 @@ void Scene::UpdateScene(float time)
 
 void Scene::BindDrawingToCmdBuffer(VkCommandBuffer cmdBuffer) const
 {
-	vkCmdBindIndexBuffer(cmdBuffer, indexBuffer.m_buffer, 0u, VK_INDEX_TYPE_UINT32);
+	cubenorm.m_meshes[0].BindDrawingToCmdBuffer(cmdBuffer);
+	return;
+
+	////////////////////////////////
+
+	vkCmdBindIndexBuffer(cmdBuffer, indexBufferHandle.buffer, 0u, VK_INDEX_TYPE_UINT32);
 
 	VkDeviceSize vertexBufferOffsetArray[] = { 0 };
-	vkCmdBindVertexBuffers(cmdBuffer, 0u, 1u, &(vertexBuffer.m_buffer), vertexBufferOffsetArray);
+	vkCmdBindVertexBuffers(cmdBuffer, 0u, 1u, &vertexBufferHandle.buffer, vertexBufferOffsetArray);
 
 	vkCmdDrawIndexed(cmdBuffer, modelIndexCount, modelInstanceCount, 0u, 0u, 0u);
 
@@ -114,6 +126,6 @@ void Scene::BindDrawingToCmdBuffer(VkCommandBuffer cmdBuffer) const
 
 void Scene::Destroy()
 {
-	vertexBuffer.Destroy();
-	indexBuffer.Destroy();
+	//vertexBuffer.Destroy();
+	//indexBuffer.Destroy();
 }

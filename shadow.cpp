@@ -4,7 +4,6 @@
 
 #include "config.h"
 
-#include "dedicated_buffer.h"
 #include "memory.h"
 #include "global_descriptor_sets.h"
 #include "vertex.h"

@@ -2,6 +2,8 @@
 
 #include <glm/glm.hpp>
 
+#include "device_buffer_allocator.h"
+
 #define MAX_NUM_VIEWPOINTPLANES 8 // Maybe cascades go up to that ?
 
 #define CONCAT_MACRO_INTERNAL(x, y) x##y
@@ -64,7 +66,6 @@ struct AppConfigCB {
 
 #include "doge_vulkan.h"
 #include "vulkan_helpers.h"
-#include "dedicated_buffer.h"
 
 #include <tuple>
 #include <array>
@@ -118,8 +119,8 @@ public:
 	static void CommitCBuffer() {
 		constexpr size_t idx = TupleTypeIndex<CB, UsedCStructs>::value;
 
-		uniformBuffers[idx].UploadData(
-			VkDeviceSize{ 0 },
+		gDeviceBufferAllocator.UploadData(
+			uniformBufferHandles[idx], VkDeviceSize{ 0 },
 			VkDeviceSize{ USED_CSTRUCT_SIZES[idx] },
 			&std::get<idx>(usedCStructs));
 	}
@@ -146,7 +147,7 @@ public:
 
 	static VkDescriptorSet descriptorSets[CB_COUNT];
 
-	static DedicatedBuffer uniformBuffers[CB_COUNT];	
+	static DeviceBufferAllocator::Handle uniformBufferHandles[CB_COUNT];
 
 	static void Initialize();
 };

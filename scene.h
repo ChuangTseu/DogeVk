@@ -5,8 +5,9 @@
 #include <glm/mat4x4.hpp>
 
 #include "doge_vulkan.h"
-#include "dedicated_buffer.h"
+#include "device_buffer_allocator.h"
 #include "light.h"
+#include "model.h"
 
 struct Scene {
 	void PrepareScene();
@@ -18,8 +19,8 @@ struct Scene {
 	void Destroy();
 
 	// Contains geometry, materials
-	DedicatedBuffer vertexBuffer;
-	DedicatedBuffer indexBuffer;
+	DeviceBufferAllocator::Handle vertexBufferHandle;
+	DeviceBufferAllocator::Handle indexBufferHandle;
 
 	VkPrimitiveTopology modelPrimitiveTopology;
 	u32 modelInstanceCount;
@@ -30,6 +31,8 @@ struct Scene {
 	glm::mat4 modelWorld;
 	glm::mat4 modelWorld2;
 	glm::mat4 modelWorld4;
+
+	Model cubenorm;
 
 	// Contains light
 	std::vector<DirLight> dirLights;

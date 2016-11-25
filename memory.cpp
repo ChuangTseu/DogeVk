@@ -7,6 +7,7 @@
 VkPhysicalDeviceMemoryProperties gVkPhysicalMemProperties;
 
 u32 getOptimalMemTypeIndex(u32 desiredMemTypeFlags, u32 compatibleTypesBitset) {
+
 	for (u32 i = 0; i < gVkPhysicalMemProperties.memoryTypeCount; ++i) {
 		if (hasBisSet(compatibleTypesBitset, i)) { // Memory type at index i is supported
 			if ((gVkPhysicalMemProperties.memoryTypes[i].propertyFlags & desiredMemTypeFlags) == desiredMemTypeFlags) {

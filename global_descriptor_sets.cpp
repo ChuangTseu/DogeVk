@@ -4,7 +4,8 @@ GlobalDescriptorSets::UsedCStructs GlobalDescriptorSets::usedCStructs;
 VkDescriptorSetLayout GlobalDescriptorSets::descriptorSetLayouts[GlobalDescriptorSets::CB_COUNT];
 VkDescriptorPool GlobalDescriptorSets::descriptorPool;
 VkDescriptorSet GlobalDescriptorSets::descriptorSets[GlobalDescriptorSets::CB_COUNT];
-DedicatedBuffer GlobalDescriptorSets::uniformBuffers[GlobalDescriptorSets::CB_COUNT];
+//DedicatedBuffer GlobalDescriptorSets::uniformBuffers[GlobalDescriptorSets::CB_COUNT];
+DeviceBufferAllocator::Handle GlobalDescriptorSets::uniformBufferHandles[GlobalDescriptorSets::CB_COUNT];
 
 void GlobalDescriptorSets::Initialize()
 {
@@ -52,9 +53,10 @@ void GlobalDescriptorSets::Initialize()
 	VkDescriptorBufferInfo descriptorBufferInfos[CB_COUNT];
 
 	for (u32 i = 0; i < CB_COUNT; ++i) {
-		uniformBuffers[i].Create(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, USED_CSTRUCT_SIZES[i], DedicatedBuffer::eViaHostAccess);
+		//uniformBuffers[i].Create(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, USED_CSTRUCT_SIZES[i], DedicatedBuffer::eViaHostAccess);
+		uniformBufferHandles[i] = gDeviceBufferAllocator.GetNewBufferHandle(EDeviceBufferType::kUniformStatic, USED_CSTRUCT_SIZES[i], 0u);
 
-		descriptorBufferInfos[i].buffer = uniformBuffers[i].m_buffer;
+		descriptorBufferInfos[i].buffer = uniformBufferHandles[i].buffer;
 		descriptorBufferInfos[i].offset = VkDeviceSize{ 0 };
 		descriptorBufferInfos[i].range = VK_WHOLE_SIZE;
 	}	

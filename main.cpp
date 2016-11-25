@@ -49,12 +49,13 @@ extern "C" { _declspec(dllexport) DWORD NvOptimusEnablement = 0x00000001; }; // 
 #include "surface.h"
 #include "swapchain.h"
 #include "memory.h"
-#include "dedicated_buffer.h"
 #include "debug_report.h"
 #include "global_descriptor_sets.h"
 
 #include "forward.h"
 #include "shadow.h"
+
+#include "model.h"
 
 float fakeTime = 0.f;
 

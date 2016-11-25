@@ -24,6 +24,15 @@ Message("glfw3_FOUND: ${glfw3_FOUND}")
 Message("glfw3_CONFIG: ${glfw3_CONFIG}")
 Message("glfw3_VERSION: ${glfw3_VERSION}")
 
+find_package(assimp CONFIG REQUIRED)
+
+Message("assimp_FOUND: ${assimp_FOUND}")
+Message("assimp_CONFIG: ${assimp_CONFIG}")
+Message("assimp_VERSION: ${assimp_VERSION}")
+Message("ASSIMP_LIBRARIES: ${ASSIMP_LIBRARIES}")
+Message("ASSIMP_LIBRARY_DIRS: ${ASSIMP_LIBRARY_DIRS}")
+Message("ASSIMP_INCLUDE_DIRS: ${ASSIMP_INCLUDE_DIRS}")
+
 find_package(Vulkan REQUIRED)
 
 Message("Vulkan_FOUND: ${Vulkan_FOUND}")
@@ -33,7 +42,8 @@ Message("Vulkan_LIBRARIES: ${Vulkan_LIBRARIES}")
 set(GLSLANGVALIDATOR ${BASE_DIRECTORY}/tools/glslang/glslangValidator.exe)
 set(GLSLC ${BASE_DIRECTORY}/tools/glslc.exe)
 
-include_directories(${Vulkan_INCLUDE_DIR})
+include_directories(${ASSIMP_INCLUDE_DIRS} ${Vulkan_INCLUDE_DIR})
+link_directories(${ASSIMP_LIBRARY_DIRS})
 
 INCLUDE(${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists_include.txt)
 
@@ -54,6 +64,7 @@ Message("GLSL_FILES: ${GLSL_FILES}")
 source_group(GLSL_Files FILES ${GLSL_FILES})
 
 add_definitions(-DSHADERS_FOLDER_PATH="${BASE_DIRECTORY}/shaders/")
+add_definitions(-DMODELS_FOLDER_PATH="${BASE_DIRECTORY}/data/models/")
 
 source_group(shaders FILES 
   ${GLSL_FILES}
@@ -61,6 +72,7 @@ source_group(shaders FILES
 
 add_executable(${PROJNAME} ${SOURCE_FILES} ${GLSL_FILES})
 target_link_libraries(${PROJNAME} glm glfw ${Vulkan_LIBRARIES})
+target_link_libraries(${PROJNAME} ${ASSIMP_LIBRARIES})
 
 _copy_binaries_to_target( ${PROJNAME} )
 
